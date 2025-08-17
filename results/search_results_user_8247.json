@@ -1,0 +1,112 @@
+[
+    {
+        "user_id": 8246,
+        "sex": "Male",
+        "job.title": "ml data scientist",
+        "organization": "yandex",
+        "annual.salary": 300000.0,
+        "age": 22,
+        "question": "Привет! Хочу найти топ 10 метчей для меня",
+        "distance": 155.12725830078125,
+        "relevance_score": 1.0
+    },
+    {
+        "user_id": 3307,
+        "sex": "Female",
+        "job.title": "Fire Inspector",
+        "organization": "AFR Atlanta Fire & Recuse",
+        "annual.salary": 49471.77,
+        "age": 56,
+        "question": "Обозначение для особо мощного 9 мм патрона Сколько дюймов в 9 мм калибре как обозначаются .30 Russian и .25 ACP Какое соотношение дюйма к миллиметру",
+        "distance": 668.1022338867188,
+        "relevance_score": 0.9108989630966333
+    },
+    {
+        "user_id": 756,
+        "sex": "Female",
+        "job.title": "Director of EAP Services",
+        "organization": "DHR Department of Human Reources",
+        "annual.salary": 124600.01,
+        "age": 56,
+        "question": "в пятёрку лучших хит-парадов какой страны вошли все три альбома? в каком году Боуи добился крупного успеха? с каким синглом? стиль хит-альбомома Young Americans?",
+        "distance": 471.06207275390625,
+        "relevance_score": 0.8810203967385192
+    },
+    {
+        "user_id": 8004,
+        "sex": "Female",
+        "job.title": "Intern",
+        "organization": "DWM Department of Watershed Management",
+        "annual.salary": 31158.4,
+        "age": 21,
+        "question": "с какой системой объединена система продажи билетов Супертрама? На каком участке используются традиционные железнодорожные рельсы? Какая кампания управляет Супертрамом? До какой станции будет расширена система Супертрама в 2017 году?",
+        "distance": 653.827392578125,
+        "relevance_score": 0.8638293734756214
+    },
+    {
+        "user_id": 3798,
+        "sex": "Female",
+        "job.title": "Office Support Assistant, Sr (D)",
+        "organization": "APD Atlanta Police Department",
+        "annual.salary": 40245.52,
+        "age": 45,
+        "question": "от какого из вида йоги отличается Хатха -йога? какие элементы добавляют к йогическим позам (асанам) раджа-йоги Патанджали? какое развитие Хатха-йога дает раджа-йоге Патанджали? чем отличаеться Хатха-йога от раджа-йоги Патанджали?",
+        "distance": 537.1083984375,
+        "relevance_score": 0.8636763527689394
+    },
+    {
+        "user_id": 3292,
+        "sex": "Male",
+        "job.title": "Police Officer (E) (F) (O) (B) (S)",
+        "organization": "APD Atlanta Police Department",
+        "annual.salary": 35420.9,
+        "age": 37,
+        "question": "Какие экстремальные виды спорта доступны для посетителей острова? Какими видами спорта могут заниматься отдыхающие на острове Ада Циганлия? Сколько человек ежедневно купаются на искусственном озере ежедневно? Какая общая протяжность пляжей острова Ада Циганлия?",
+        "distance": 655.369873046875,
+        "relevance_score": 0.8337359850141823
+    },
+    {
+        "user_id": 3301,
+        "sex": "Male",
+        "job.title": "Process Control Technician, Sr (D)",
+        "organization": "DWM Department of Watershed Management",
+        "annual.salary": 54276.18,
+        "age": 59,
+        "question": "Какова пропускная способность диска по стандарту ECMA-130 Каково расстояние между дорожками по стандарту ECMA-130 Какой скорости соответствует ёмкость в 650 Мбайт Какова линейная скорость вращения диска по стандарту ECMA-130",
+        "distance": 576.0382690429688,
+        "relevance_score": 0.8228945957488493
+    },
+    {
+        "user_id": 3321,
+        "sex": "Female",
+        "job.title": "Ethics Officer",
+        "organization": "ETH Ethics Administration",
+        "annual.salary": 151424.02,
+        "age": 56,
+        "question": "что при вращеннии обеспечивает поршень? кем в детстве работал Уатт? к какому году суммарная мощность всех работавших паровых машин превысила 26 млн кВт (35 млн л. с.).? кто создал более совершенную паровую машину?",
+        "distance": 630.6857299804688,
+        "relevance_score": 0.7458841206528993
+    },
+    {
+        "user_id": 1602,
+        "sex": "Female",
+        "job.title": "Planning, Assistant Director",
+        "organization": "PCD Planning & Community Development",
+        "annual.salary": 74000.01,
+        "age": 37,
+        "question": "в какой период было умягчение идеологических установок чьи стихи собрал Пётр Орешин в альманах Деревня в русской поэзии  произведения каких авторов надо было убрать из альманаха В каком году поэт Пётр Орешин подготовил альманах Деревня в русской поэзии  какие произведения бунина удалось напечатать",
+        "distance": 663.4757690429688,
+        "relevance_score": 0.7421453912627871
+    },
+    {
+        "user_id": 1985,
+        "sex": "Male",
+        "job.title": "Parks Design Director",
+        "organization": "PRC Parks, Recreation, & Cultural Affairs",
+        "annual.salary": 90500.01,
+        "age": 55,
+        "question": "Героем скольких романов является суперинтендант Баттл? Какая профессия у суперинтенданта Баттла? С чем связаны дела, которыми занимается Баттл? Сколько детей у Баттла и Мэри? Как зовут жену Баттла?",
+        "distance": 645.080322265625,
+        "relevance_score": 0.7242290636634914
+    }
+]
