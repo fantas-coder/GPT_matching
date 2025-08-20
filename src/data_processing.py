@@ -1,8 +1,6 @@
 # Стандартные библиотеки
-import numpy as np
 import random
 import pickle
-from typing import Tuple, List
 
 # Загрузчик датасетов
 from datasets import load_dataset
@@ -20,12 +18,33 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.manifold import TSNE
 
-# Многопоточность
-from concurrent.futures import ThreadPoolExecutor
-
 # Конфигурация
-from src.config import (os, pd, tqdm,
+from src.config import (os, pd, np, tqdm, logging, Tuple, List,
                         GPT_MODEL_NAME, SENTIMENT_MODEL_TASK, SENTIMENT_MODEL, STYLE_MODEL, QUESTIONS_DATA_BASE)
+
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
+# Создаем обработчик для вывода логов через tqdm
+class TqdmLoggingHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            tqdm.write(msg)
+        except Exception as e:
+            logger.error(f"Ошибка настройки tqdm: {e}")
+            self.handleError(record)
+
+
+# Удаляем существующие обработчики, чтобы избежать дублирования
+logger.handlers = []
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+tqdm_handler = TqdmLoggingHandler()
+tqdm_handler.setFormatter(formatter)
+logger.addHandler(tqdm_handler)
 
 
 class DataProcessor:
@@ -55,34 +74,57 @@ class DataProcessor:
             os.makedirs('../artifacts', exist_ok=True)
             if os.path.exists('../artifacts/job_word2vec.model'):
                 self.job_model = Word2Vec.load('../artifacts/job_word2vec.model')
+                logger.info("Загружена модель Word2Vec: ../artifacts/job_word2vec.model")
             for name in self.scalers:
                 scaler_path = f'../artifacts/{name}_scaler.pkl'
                 if os.path.exists(scaler_path):
                     self.scalers[name] = pickle.load(open(scaler_path, 'rb'))
+                    logger.info(f"Загружен нормализатор: {scaler_path}")
             if os.path.exists('../artifacts/topic_model'):
                 self.topic_model = BERTopic.load('../artifacts/topic_model')
+                logger.info("Загружена модель BERTopic: ../artifacts/topic_model")
         except Exception as e:
-            print(f"Ошибка загрузки артефактов: {e}")
+            logger.error(f"Ошибка загрузки артефактов: {e}")
             self.job_model = None
             self.scalers = {'salary': None, 'age': None, 'features': None, 'topic': None}
 
     def load_and_preprocess(
             self,
-            filepath: str
+            filepath: str = '../data/atlanta_salary_data_2015_full.csv',
+            start_filepath: str = '../data/start_profil_data.csv',
     ) -> pd.DataFrame:
         """
-        Функция загружает данные из filepath и удаляет лишние столбцы
+        Загружает данные из start_filepath, удаляет лишние столбцы, добавляет X, Y, Z и сохраняет в filepath
 
-        :param filepath: Путь к базе данных в формате .csv
+        :param filepath: Путь к предобработанной базе данных в формате .csv
+        :param start_filepath: Путь к начальной базе данных в формате .csv
         :return: База данных в формате DataFrame
         """
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        os.makedirs(os.path.dirname(start_filepath), exist_ok=True)
         try:
-            df = pd.read_csv(filepath)
-            return df.reset_index().rename(columns={'index': 'user_id'}).drop(['name', 'ethnic.origin'], axis=1)
+            df = pd.read_csv(start_filepath)
+            if 'user_id' in df.columns:
+                logger.info("Обнаружен существующий user_id в start_filepath, используем его")
+                df['user_id'] = df['user_id'].astype(int)
+            else:
+                df = df.reset_index().rename(columns={'index': 'user_id'})
+                df['user_id'] = df['user_id'].astype(int)
+            df = df.drop(['name', 'ethnic.origin'], axis=1, errors='ignore')
+            # Добавление колонок X, Y, Z со случайными значениями от 0 до 1000
+            df['X'] = np.random.randint(0, 1001, size=len(df))
+            df['Y'] = np.random.randint(0, 1001, size=len(df))
+            df['Z'] = np.random.randint(0, 1001, size=len(df))
+            # Сохранение обновленного датасета
+            df.to_csv(filepath, index=False, encoding='utf-8')
+            logger.info(f"Загружен и обработан файл: {filepath}, строк: {len(df)}, добавлены колонки X, Y, Z")
+            logger.info(f"Тип user_id: {df['user_id'].dtype}, форма: {df['user_id'].shape}")
+            return df
         except FileNotFoundError:
+            logger.error(f"Файл {filepath} не найден")
             raise FileNotFoundError(f"Файл {filepath} не найден")
         except KeyError as e:
+            logger.error(f"Отсутствуют ожидаемые столбцы: {e}")
             raise KeyError(f"Отсутствуют ожидаемые столбцы: {e}")
 
     def load_questions(
@@ -118,12 +160,14 @@ class DataProcessor:
                     combined_questions.append(combined)
 
             random.shuffle(combined_questions)
-            return combined_questions[:num_records]
+            questions = combined_questions[:num_records]
+            logger.info(f"Загружено {len(questions)} вопросов из SberQuAD")
+            return questions
         except Exception as e:
-            print(f"Ошибка загрузки SberQuAD: {e}")
-            # Генерация простых вопросов с нумерацией по контекстам
-            return [f"Вопросы о теме {i}: Что такое X? Как работает Y?"
-                    for i in range(num_records)]
+            logger.error(f"Ошибка загрузки SberQuAD: {e}")
+            questions = [f"Вопросы о теме {i}: Что такое X? Как работает Y?" for i in range(num_records)]
+            logger.warning(f"Сгенерированы заглушки для {num_records} вопросов")
+            return questions
 
     def encode_features(
             self,
@@ -140,6 +184,7 @@ class DataProcessor:
         required_columns = ['sex', 'job.title', 'question']
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
+            logger.error(f"Отсутствуют столбцы: {missing_columns}")
             raise ValueError(f"Отсутствуют столбцы: {missing_columns}")
 
         # Кодирование пола
@@ -157,43 +202,42 @@ class DataProcessor:
             )
             os.makedirs('../artifacts', exist_ok=True)
             self.job_model.save('../artifacts/job_word2vec.model')
+            logger.info("Сохранена модель Word2Vec: ../artifacts/job_word2vec.model")
         avg_vector = np.mean(self.job_model.wv.vectors, axis=0) if self.job_model.wv.vectors.size > 0 else np.zeros(8)
         df['job_vector'] = df['job_clean'].apply(
             lambda x: self.job_model.wv[x] if x in self.job_model.wv else avg_vector
         )
 
         # Векторизация вопросов
-        print("\nВекторизация вопросов...")
+        logger.info("Векторизация вопросов...")
         questions = df['question'].fillna('').tolist()
-
-        with ThreadPoolExecutor() as executor:
-            results = list(tqdm(
-                executor.map(
-                    lambda x: self.gpt_model.encode(x, normalize_embeddings=True) if pd.notnull(x) else np.zeros(384),
-                    questions
-                ),
-                total=len(questions),
-                desc='Обработка вопросов'
-            ))
-        df['question_vector'] = results
+        # Пакетная обработка
+        results = self.gpt_model.encode(
+            questions,
+            batch_size=32,
+            show_progress_bar=True,
+            normalize_embeddings=True
+        )
+        df['question_vector'] = [results[i] if questions[i] else np.zeros(384) for i in range(len(questions))]
+        logger.info("Векторизация вопросов завершена")
 
         # Извлечение тематики
-        print("\nИзвлечение тематики...")
+        logger.info("Извлечение тематики...")
         valid_questions = [q if q else "Пустой вопрос" for q in questions]
         if train_mode:
             try:
                 topics, _ = self.topic_model.fit_transform(valid_questions)
                 os.makedirs('../artifacts', exist_ok=True)
                 self.topic_model.save('../artifacts/topic_model', serialization='safetensors')
-                print("Модель BERTopic сохранена с использованием safetensors")
+                logger.info("Модель BERTopic сохранена: ../artifacts/topic_model")
             except Exception as e:
-                print(f"Ошибка сохранения модели BERTopic: {e}. Продолжаем без сохранения модели.")
+                logger.error(f"Ошибка сохранения модели BERTopic: {e}")
                 topics = [0] * len(valid_questions)  # Фallback: нулевые темы
         else:
             try:
                 topics = self.topic_model.transform(valid_questions)[0]
             except Exception as e:
-                print(f"Ошибка преобразования тем: {e}. Используем нулевые темы.")
+                logger.error(f"Ошибка преобразования тем: {e}")
                 topics = [0] * len(valid_questions)
         df['topic'] = topics
 
@@ -203,10 +247,10 @@ class DataProcessor:
             df['topic'] = df['topic'].apply(lambda x: x if x <= max_topic else max_topic)
 
         # Проверка тем
-        print(f"Уникальные темы: {np.unique(topics)}")
+        logger.info(f"Уникальные темы: {np.unique(topics)}")
 
         # Извлечение тональности
-        print("\nИзвлечение тональности...")
+        logger.info("Извлечение тональности...")
 
         def get_sentiment_score(question):
             if pd.notnull(question) and question:
@@ -220,7 +264,7 @@ class DataProcessor:
         )
 
         # Извлечение признаков стиля
-        print("\nИзвлечение признаков стиля...")
+        logger.info("Извлечение признаков стиля...")
 
         def extract_style_features(question):
             if pd.notnull(question) and question:
@@ -256,6 +300,7 @@ class DataProcessor:
                             'question_length', 'question_words', 'formality_score', 'topic']
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
+            logger.error(f"Отсутствуют столбцы: {missing_columns}")
             raise ValueError(f"Отсутствуют столбцы: {missing_columns}")
 
         # Инициализация нормализаторов
@@ -315,10 +360,12 @@ class DataProcessor:
                 'question_words', 'formality_score']].values,   # 9 значений
             df['gender_enc'].values.reshape(-1, 1),             # 1 значение
             np.vstack(df['job_vector'].values),                 # 8 значений
-            np.vstack(df['question_vector'].values)             # 384 значения
+            np.vstack(df['question_vector'].values),            # 384 значения
+            df[['X', 'Y', 'Z']].values                          # 3 значения (без нормализации)
         ]
-        vectors = np.hstack(features).astype('float32')         # Итого: 9+1+8+384=402
-        print(f"Созданы векторы размерности: {vectors.shape}")
+
+        vectors = np.hstack(features).astype('float32')         # Итого: 9+1+8+384+3=405
+        logger.info(f"Созданы векторы размерности: {vectors.shape}")
         return vectors
 
     def visualize_vectors(
@@ -334,27 +381,62 @@ class DataProcessor:
         :param df: DataFrame с метаданными (topic, gender_enc)
         :param output_path: Путь для сохранения графика
         """
-        print("\nВизуализация векторов с помощью t-SNE...")
+        logger.info("Визуализация векторов с помощью t-SNE...")
         if len(vectors) != len(df):
+            logger.error(
+                f"Количество векторов ({len(vectors)}) не соответствует количеству записей в DataFrame ({len(df)})")
             raise ValueError(
                 f"Количество векторов ({len(vectors)}) не соответствует количеству записей в DataFrame ({len(df)})")
+
+        # Проверка входных данных
+        required_columns = ['topic_norm', 'gender_enc', 'user_id']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.error(f"Отсутствуют столбцы в DataFrame: {missing_columns}")
+            raise ValueError(f"Отсутствуют столбцы в DataFrame: {missing_columns}")
+
+        # Проверка типов данных и пропусков
+        logger.info(f"Проверка DataFrame: {df[required_columns].dtypes}")
+        logger.info(f"Количество пропусков: topic_norm={df['topic_norm'].isna().sum()}, "
+                    f"gender_enc={df['gender_enc'].isna().sum()}, user_id={df['user_id'].isna().sum()}")
+        # Заполнение пропусков
+        df = df.copy()  # Создаем копию, чтобы не изменять оригинальный DataFrame
+        df['topic_norm'] = df['topic_norm'].fillna(0).astype(float)
+        df['gender_enc'] = df['gender_enc'].fillna(0).astype(int)
+        df['user_id'] = df['user_id'].fillna(-1).astype(int)
 
         # Применение t-SNE для снижения размерности до 2D
         tsne = TSNE(n_components=2, random_state=42, n_jobs=-1, perplexity=min(30, len(vectors) - 1))
         vectors_2d = tsne.fit_transform(vectors)
+        logger.info(f"Форма vectors_2d после TSNE: {vectors_2d.shape}")
+
+        if vectors_2d.shape[1] != 2:
+            logger.error(f"Ожидается vectors_2d с 2 компонентами, получено: {vectors_2d.shape[1]}")
+            raise ValueError(f"Ожидается vectors_2d с 2 компонентами, получено: {vectors_2d.shape[1]}")
+
+        # Явное преобразование в одномерные массивы
+        x = vectors_2d[:, 0].flatten().astype(float)
+        y = vectors_2d[:, 1].flatten().astype(float)
+        logger.info(f"Форма x: {x.shape}, y: {y.shape}")
+
+        # Проверка типов данных
+        topic_norm = df['topic_norm'].astype(str).values
+        gender = df['gender_enc'].map({1: 'Male', 0: 'Female'}).fillna('Unknown').values
+        user_id = df['user_id'].astype(str).values
+        logger.info(f"Форма topic_norm: {topic_norm.shape}, gender: {gender.shape}, user_id: {user_id.shape}")
 
         # Создание DataFrame для визуализации
         viz_df = pd.DataFrame({
-            'x': vectors_2d[:, 0],
-            'y': vectors_2d[:, 1],
-            'topic': df['topic_norm'].astype(str),
-            'gender': df['gender_enc'].map({1: 'Male', 0: 'Female'}),
-            'user_id': df['user_id'].astype(str)
+            'x': x,
+            'y': y,
+            'topic': topic_norm,
+            'gender': gender,
+            'user_id': user_id
         })
 
         # Построение scatter-графика
         plt.figure(figsize=(10, 8))
-        scatter = sns.scatterplot(
+        sns.scatterplot(
             data=viz_df,
             x='x',
             y='y',
@@ -371,7 +453,7 @@ class DataProcessor:
         # Сохранение графика
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         plt.savefig(output_path, bbox_inches='tight')
-        print(f"График сохранен в {output_path}")
+        logger.info(f"График сохранен в {output_path}")
         plt.close()
 
     def visualize_saved_vectors(
@@ -388,23 +470,28 @@ class DataProcessor:
         :param output_path: Путь для сохранения графика
         """
         if not os.path.exists(vectors_path):
+            logger.error(f"Файл векторов {vectors_path} не найден")
             raise FileNotFoundError(f"Файл векторов {vectors_path} не найден")
         if not os.path.exists(metadata_path):
+            logger.error(f"Файл метаданных {metadata_path} не найден")
             raise FileNotFoundError(f"Файл метаданных {metadata_path} не найден")
 
         # Загрузка векторов
         vectors = np.load(vectors_path, allow_pickle=True).astype('float32')
-        print(f"Загружены векторы размерности: {vectors.shape}")
+        logger.info(f"Загружены векторы размерности: {vectors.shape}")
 
         # Загрузка метаданных
         df = pd.read_csv(metadata_path)
         required_columns = ['user_id', 'topic_norm', 'gender_enc']
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
+            logger.error(f"Отсутствуют столбцы в {metadata_path}: {missing_columns}")
             raise ValueError(f"Отсутствуют столбцы в {metadata_path}: {missing_columns}")
 
         # Проверка соответствия размеров
         if len(vectors) != len(df):
+            logger.error(
+                f"Количество векторов ({len(vectors)}) не соответствует количеству записей в {metadata_path} ({len(df)})")
             raise ValueError(
                 f"Количество векторов ({len(vectors)}) не соответствует количеству записей в {metadata_path} ({len(df)})")
 
@@ -415,7 +502,8 @@ class DataProcessor:
             self,
             input_path: str = '../data/atlanta_salary_data_2015_full.csv',
             output_path: str = '../data/processed_profiles.csv',
-            intermediate_path: str = '../data/intermediate_dataset.csv'
+            intermediate_path: str = '../data/intermediate_dataset.csv',
+            start_filepath: str = '../data/start_profil_data.csv'
     ) -> Tuple[pd.DataFrame, np.ndarray]:
         """
         Функция выполняет основной пайплайн обработки БД
@@ -424,36 +512,156 @@ class DataProcessor:
         :param input_path: Путь до БД профилей в .csv
         :param output_path: Путь для сохранения векторизованной БД в .csv
         :param intermediate_path: Путь для сохранения начальной объединённой БД (Профиль + Текст) в .csv
+        :param start_filepath: Путь до БД профилей в .csv (начальная версия)
         :return: Возвращает векторизованную БД и финальный вектор
         """
         os.makedirs(os.path.dirname(input_path), exist_ok=True)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         os.makedirs(os.path.dirname(intermediate_path), exist_ok=True)
+        os.makedirs(os.path.dirname(start_filepath), exist_ok=True)
 
         # Загрузка и объединение данных
-        df = self.load_and_preprocess(input_path)   # Загрузка БД профилей
-        questions = self.load_questions(len(df))    # Загрузка тестов
-        df['question'] = questions[:len(df)]        # Объединение в одну БД
+        df = self.load_and_preprocess(input_path, start_filepath)   # Загрузка БД профилей
+        questions = self.load_questions(len(df))                    # Загрузка тестов
+        df['question'] = questions[:len(df)]                        # Объединение в одну БД
 
         # Сохранение промежуточной БД с вопросами
-        print("Сохранение промежуточной БД с вопросами...")
         df.to_csv(intermediate_path, index=False, encoding='utf-8')
-        print(f"Промежуточная БД сохранена в {intermediate_path}")
-        print("Исходная БД")
-        print(df.head())
+        logger.info(f"Промежуточная БД сохранена: {intermediate_path}")
+        logger.info(f"Исходная БД (первые 5 строк):\n{df.head()}")
 
         # Кодирование признаков
-        df = self.encode_features(df, train_mode=True)               # Кодируем признаки
-        df = self.normalize_features(df, train_mode=True)            # Нормализация бд
-        print("Нормализованная БД")
-        print(df.head())
+        df = self.encode_features(df, train_mode=True)                      # Кодируем признаки
+        df = self.normalize_features(df, train_mode=True)                   # Нормализация бд
+        logger.info(f"Нормализованная БД (первые 5 строк):\n{df.head()}")
 
         # Визуализация, создание и сохранение векторов
-        vectors = self.create_vectors(df)                                                       # Создание
-        self.visualize_vectors(vectors, df, output_path='../results/vectors_visualization.png')    # Визуализация
+        vectors = self.create_vectors(df)                                                           # Создание
+        self.visualize_vectors(vectors, df, output_path='../results/vectors_visualization.png')     # Визуализация
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        df.to_csv(output_path, index=False)                                                     # Сохранение
+        df.to_csv(output_path, index=False)                                                         # Сохранение
         os.makedirs('../artifacts', exist_ok=True)
         np.save('../artifacts/user_vectors.npy', vectors)
+        logger.info(f"Сохранены векторы: ../artifacts/user_vectors.npy")
+        logger.info(f"Сохранена векторизованная БД: {output_path}")
 
         return df, vectors
+
+    def retrain_word2vec(
+            self,
+            intermediate_path: str = '../data/intermediate_dataset.csv'
+    ) -> None:
+        """
+        Переобучает модель Word2Vec и обновляет job_vector
+
+        :param intermediate_path: Путь до объединённой БД
+        """
+        # Загрузка данных из intermediate_dataset.csv
+        try:
+            intermediate_df = pd.read_csv(intermediate_path)
+            if 'job.title' not in intermediate_df.columns:
+                logger.error("Столбец 'job.title' отсутствует в intermediate_dataset.csv")
+                raise ValueError("Столбец 'job.title' отсутствует в intermediate_dataset.csv")
+        except FileNotFoundError:
+            logger.error(f"Файл {intermediate_path} не найден")
+            raise FileNotFoundError(f"Файл {intermediate_path} не найден")
+
+        # Подготовка данных для обучения
+        job_titles = intermediate_df['job.title'].str.lower().str.strip().fillna('').tolist()
+        job_titles = [title for title in job_titles if title and isinstance(title, str)]
+        if not job_titles:
+            logger.error("Нет валидных job.title в intermediate_dataset.csv")
+            raise ValueError("Нет валидных job.title в intermediate_dataset.csv")
+
+        new_sentences = [[title] for title in job_titles]
+        logger.info(f"Количество job.title для обучения Word2Vec: {len(new_sentences)}")
+        logger.info(f"Примеры job.title: {new_sentences[:5]}")
+
+        # Переобучение Word2Vec
+        self.job_model = Word2Vec(
+            sentences=new_sentences,
+            vector_size=8,
+            min_count=1,
+            workers=4
+        )
+        os.makedirs('../artifacts', exist_ok=True)
+        self.job_model.save('../artifacts/job_word2vec.model')
+        logger.info("Сохранена модель Word2Vec: ../artifacts/job_word2vec.model")
+
+        # Обновление job_vector и обработка question_vector в processed_profiles.csv
+        try:
+            df = pd.read_csv('../data/processed_profiles.csv')
+
+            # Обновление job_vector
+            df['job_vector'] = intermediate_df['job.title'].str.lower().str.strip().fillna('')
+            avg_vector = np.mean(self.job_model.wv.vectors, axis=0) if self.job_model.wv.vectors.size > 0 else np.zeros(
+                8)
+            df['job_vector'] = df['job_vector'].apply(
+                lambda x: self.job_model.wv[x] if x in self.job_model.wv else avg_vector
+            )
+
+            # Обработка question_vector
+            def parse_question_vector(x):
+                """Преобразует строку с вектором в numpy array"""
+                try:
+                    clean_str = x.replace('/n', ' ').replace('[', '').replace(']', '')
+                    return np.fromstring(clean_str, sep=' ')
+                except Exception as e:
+                    logger.info(f"Ошибка преобразования df['question_vector']: {e}")
+
+            df['question_vector'] = df['question_vector'].apply(parse_question_vector)
+
+            # Пересчет финальных векторов
+            vectors = self.create_vectors(df)
+
+            # Сохранение обновленных данных
+            df.to_csv('../data/processed_profiles.csv', index=False, encoding='utf-8')
+            np.save('../artifacts/user_vectors.npy', vectors)
+            logger.info(
+                "Обновлены ../data/processed_profiles.csv и ../artifacts/user_vectors.npy после переобучения Word2Vec")
+        except Exception as e:
+            logger.error(f"Ошибка обновления векторов после переобучения Word2Vec: {e}")
+            raise
+
+    def retrain_all_models(
+            self,
+            intermediate_path: str = '../data/intermediate_dataset.csv',
+            output_path: str = '../data/processed_profiles.csv'
+    ) -> None:
+        """
+        Переобучает все модели (Word2Vec, BERTopic, sentiment, style) и обновляет вектора
+
+        :param intermediate_path: Путь до объединённой БД (Профиль + Текст)
+        :param output_path: Путь до векторизованной БД для сохранения
+        """
+        try:
+            intermediate_df = pd.read_csv(intermediate_path)
+            required_columns = ['job.title', 'question', 'user_id', 'sex', 'age', 'annual.salary']
+            missing_columns = [col for col in required_columns if col not in intermediate_df.columns]
+            if missing_columns:
+                logger.error(f"Отсутствуют столбцы в {intermediate_path}: {missing_columns}")
+                raise ValueError(f"Отсутствуют столбцы в {intermediate_path}: {missing_columns}")
+        except FileNotFoundError:
+            logger.error(f"Файл {intermediate_path} не найден")
+            raise FileNotFoundError(f"Файл {intermediate_path} не найден")
+
+        # Обновляем вектора в processed_profiles.csv и user_vectors.npy
+        try:
+            # Кодирование признаков
+            df = self.encode_features(intermediate_df, train_mode=True)
+            df = self.normalize_features(df, train_mode=True)
+            logger.info(f"Нормализованная БД (первые 5 строк):\n{df.head()}")
+
+            # Создание и сохранение векторов
+            vectors = self.create_vectors(df)  # Создание
+
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            df.to_csv(output_path, index=False)  # Сохранение
+
+            os.makedirs('../artifacts', exist_ok=True)
+            np.save('../artifacts/user_vectors.npy', vectors)
+            logger.info(
+                "Обновлены ../data/processed_profiles.csv и ../artifacts/user_vectors.npy после переобучения всех моделей")
+        except Exception as e:
+            logger.error(f"Ошибка обновления векторов после переобучения всех моделей: {e}")
+            raise
