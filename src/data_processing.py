@@ -22,7 +22,6 @@ from sklearn.manifold import TSNE
 from src.config import (os, pd, np, tqdm, logging, Tuple, List,
                         GPT_MODEL_NAME, SENTIMENT_MODEL_TASK, SENTIMENT_MODEL, STYLE_MODEL, QUESTIONS_DATA_BASE)
 
-
 # Настройка логирования
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -49,17 +48,17 @@ logger.addHandler(tqdm_handler)
 
 class DataProcessor:
     def __init__(self):
-        self.gpt_model = SentenceTransformer(GPT_MODEL_NAME)            # Модель для эмбедингов текстов
-        self.job_model = None                                           # Word2Vec для кодирования признаков
-        self.sentiment_model = pipeline(                                # Модель для извлечения тональности
+        self.gpt_model = SentenceTransformer(GPT_MODEL_NAME)  # Модель для эмбедингов текстов
+        self.job_model = None  # Word2Vec для кодирования признаков
+        self.sentiment_model = pipeline(  # Модель для извлечения тональности
             SENTIMENT_MODEL_TASK,
             model=SENTIMENT_MODEL,
             tokenizer=SENTIMENT_MODEL,
             return_all_scores=True
         )
-        self.topic_model = BERTopic(language='russian', verbose=True)   # Модель для извлечения тематики
-        self.nlp = spacy.load(STYLE_MODEL)                              # Модель для извлечения стиля
-        self.scalers = {                                                # Параметры для нормализации
+        self.topic_model = BERTopic(language='russian', verbose=True)  # Модель для извлечения тематики
+        self.nlp = spacy.load(STYLE_MODEL)  # Модель для извлечения стиля
+        self.scalers = {  # Параметры для нормализации
             'salary': None,
             'age': None,
             'features': None,
@@ -90,20 +89,20 @@ class DataProcessor:
 
     def load_and_preprocess(
             self,
-            filepath: str = '../data/atlanta_salary_data_2015_full.csv',
-            start_filepath: str = '../data/start_profil_data.csv',
+            input_filepath: str = '../data/atlanta_salary_data_2015_full.csv',
+            output_filepath: str = '../data/prepared_data.csv',
     ) -> pd.DataFrame:
         """
-        Загружает данные из start_filepath, удаляет лишние столбцы, добавляет X, Y, Z и сохраняет в filepath
+        Загружает данные из input_filepath, удаляет лишние столбцы, добавляет X, Y, Z и сохраняет в output_filepath
 
-        :param filepath: Путь к предобработанной базе данных в формате .csv
-        :param start_filepath: Путь к начальной базе данных в формате .csv
+        :param input_filepath: Путь к начальной базе данных в формате .csv
+        :param output_filepath: Путь к предобработанной базе данных в формате .csv
         :return: База данных в формате DataFrame
         """
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        os.makedirs(os.path.dirname(start_filepath), exist_ok=True)
+        os.makedirs(os.path.dirname(input_filepath), exist_ok=True)
+        os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
         try:
-            df = pd.read_csv(start_filepath)
+            df = pd.read_csv(input_filepath)
             if 'user_id' in df.columns:
                 logger.info("Обнаружен существующий user_id в start_filepath, используем его")
                 df['user_id'] = df['user_id'].astype(int)
@@ -116,13 +115,13 @@ class DataProcessor:
             df['Y'] = np.random.randint(0, 1001, size=len(df))
             df['Z'] = np.random.randint(0, 1001, size=len(df))
             # Сохранение обновленного датасета
-            df.to_csv(filepath, index=False, encoding='utf-8')
-            logger.info(f"Загружен и обработан файл: {filepath}, строк: {len(df)}, добавлены колонки X, Y, Z")
+            df.to_csv(output_filepath, index=False, encoding='utf-8')
+            logger.info(f"Загружен и обработан файл: {output_filepath}, строк: {len(df)}, добавлены колонки X, Y, Z")
             logger.info(f"Тип user_id: {df['user_id'].dtype}, форма: {df['user_id'].shape}")
             return df
         except FileNotFoundError:
-            logger.error(f"Файл {filepath} не найден")
-            raise FileNotFoundError(f"Файл {filepath} не найден")
+            logger.error(f"Файл {output_filepath} не найден")
+            raise FileNotFoundError(f"Файл {output_filepath} не найден")
         except KeyError as e:
             logger.error(f"Отсутствуют ожидаемые столбцы: {e}")
             raise KeyError(f"Отсутствуют ожидаемые столбцы: {e}")
@@ -273,7 +272,7 @@ class DataProcessor:
                 question_words = len(
                     [token for token in doc if token.text.lower() in ['что', 'как', 'почему', 'где', 'когда', 'кто']])
                 formality_score = len([token for token in doc if token.pos_ in ['NOUN', 'ADJ', 'VERB']]) / (
-                            len(doc) + 1)
+                        len(doc) + 1)
                 return [length, question_words, formality_score]
             return [0, 0, 0]
 
@@ -297,7 +296,8 @@ class DataProcessor:
         """
         required_columns = ['annual.salary', 'age', 'question_vector', 'job_vector',
                             'sentiment_pos', 'sentiment_neu', 'sentiment_neg',
-                            'question_length', 'question_words', 'formality_score', 'topic']
+                            'question_length', 'question_words', 'formality_score',
+                            'topic', 'X', 'Y', 'Z']
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             logger.error(f"Отсутствуют столбцы: {missing_columns}")
@@ -313,28 +313,24 @@ class DataProcessor:
             }
 
         df['salary_norm'] = self.scalers['salary'].fit_transform(df[['annual.salary']].fillna(0)) if train_mode else (
-                            self.scalers['salary'].transform(df[['annual.salary']].fillna(0)))
+            self.scalers['salary'].transform(df[['annual.salary']].fillna(0)))
         df['age_norm'] = self.scalers['age'].fit_transform(df[['age']].fillna(0)) if train_mode else (
-                         self.scalers['age'].transform(df[['age']].fillna(0)))
+            self.scalers['age'].transform(df[['age']].fillna(0)))
         df['topic_norm'] = self.scalers['topic'].fit_transform(df[['topic']].fillna(0)) if train_mode else (
-                           self.scalers['topic'].transform(df[['topic']].fillna(0)))
+            self.scalers['topic'].transform(df[['topic']].fillna(0)))
 
         # Нормализация векторов
         for col in ['question_vector', 'job_vector']:
             df[col] = df[col].apply(lambda x: x / np.linalg.norm(x) if np.linalg.norm(x) > 0 else x)
 
         # Нормализация числовых признаков
-        df[['sentiment_pos', 'sentiment_neu', 'sentiment_neg',
-            'question_length', 'question_words', 'formality_score']] = (
-            self.scalers['features'].fit_transform(
-                df[['sentiment_pos', 'sentiment_neu', 'sentiment_neg',
-                    'question_length', 'question_words', 'formality_score']].fillna(0)
-            ) if train_mode else
-            self.scalers['features'].transform(
-                df[['sentiment_pos', 'sentiment_neu', 'sentiment_neg',
-                    'question_length', 'question_words', 'formality_score']].fillna(0)
-            )
-        )
+        feature_columns = ['sentiment_pos', 'sentiment_neu', 'sentiment_neg',
+                           'question_length', 'question_words', 'formality_score',
+                           'X', 'Y', 'Z']
+        df[feature_columns] = (
+            self.scalers['features'].fit_transform(df[feature_columns].fillna(0)
+                                                   ) if train_mode else
+            self.scalers['features'].transform(df[feature_columns].fillna(0)))
 
         # Сохранение артефактов в режиме обучения
         if train_mode:
@@ -357,14 +353,14 @@ class DataProcessor:
         features = [
             df[['age_norm', 'salary_norm', 'topic_norm', 'sentiment_pos',
                 'sentiment_neu', 'sentiment_neg', 'question_length',
-                'question_words', 'formality_score']].values,   # 9 значений
-            df['gender_enc'].values.reshape(-1, 1),             # 1 значение
-            np.vstack(df['job_vector'].values),                 # 8 значений
-            np.vstack(df['question_vector'].values),            # 384 значения
-            df[['X', 'Y', 'Z']].values                          # 3 значения (без нормализации)
+                'question_words', 'formality_score']].values,  # 9 значений
+            df['gender_enc'].values.reshape(-1, 1),  # 1 значение
+            np.vstack(df['job_vector'].values),  # 8 значений
+            np.vstack(df['question_vector'].values),  # 384 значения
+            df[['X', 'Y', 'Z']].values  # 3 значения (без нормализации)
         ]
 
-        vectors = np.hstack(features).astype('float32')         # Итого: 9+1+8+384+3=405
+        vectors = np.hstack(features).astype('float32')  # Итого: 9+1+8+384+3=405
         logger.info(f"Созданы векторы размерности: {vectors.shape}")
         return vectors
 
@@ -501,29 +497,28 @@ class DataProcessor:
     def process_data(
             self,
             input_path: str = '../data/atlanta_salary_data_2015_full.csv',
-            output_path: str = '../data/processed_profiles.csv',
+            prepared_path: str = '../data/prepared_data.csv',
             intermediate_path: str = '../data/intermediate_dataset.csv',
-            start_filepath: str = '../data/start_profil_data.csv'
+            output_path: str = '../data/processed_profiles.csv'
     ) -> Tuple[pd.DataFrame, np.ndarray]:
         """
         Функция выполняет основной пайплайн обработки БД
         (Загрузка профилей + текстов -> Кодирование + Нормализация -> Создание векторов)
 
-        :param input_path: Путь до БД профилей в .csv
-        :param output_path: Путь для сохранения векторизованной БД в .csv
-        :param intermediate_path: Путь для сохранения начальной объединённой БД (Профиль + Текст) в .csv
-        :param start_filepath: Путь до БД профилей в .csv (начальная версия)
+        :param input_path: Путь до начальной БД профилей в .csv
+        :param prepared_path: Путь до БД профилей (предобработанная версия) в .csv
+        :param intermediate_path: Путь до объединённой БД (Профиль + Текст) в .csv
+        :param output_path: Путь до векторизованной БД в .csv
         :return: Возвращает векторизованную БД и финальный вектор
         """
         os.makedirs(os.path.dirname(input_path), exist_ok=True)
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        os.makedirs(os.path.dirname(prepared_path), exist_ok=True)
         os.makedirs(os.path.dirname(intermediate_path), exist_ok=True)
-        os.makedirs(os.path.dirname(start_filepath), exist_ok=True)
-
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         # Загрузка и объединение данных
-        df = self.load_and_preprocess(input_path, start_filepath)   # Загрузка БД профилей
-        questions = self.load_questions(len(df))                    # Загрузка тестов
-        df['question'] = questions[:len(df)]                        # Объединение в одну БД
+        df = self.load_and_preprocess(input_path, prepared_path)        # Загрузка БД профилей
+        questions = self.load_questions(len(df))                        # Загрузка тестов
+        df['question'] = questions[:len(df)]                            # Объединение в одну БД
 
         # Сохранение промежуточной БД с вопросами
         df.to_csv(intermediate_path, index=False, encoding='utf-8')
@@ -531,37 +526,41 @@ class DataProcessor:
         logger.info(f"Исходная БД (первые 5 строк):\n{df.head()}")
 
         # Кодирование признаков
-        df = self.encode_features(df, train_mode=True)                      # Кодируем признаки
-        df = self.normalize_features(df, train_mode=True)                   # Нормализация бд
+        df = self.encode_features(df, train_mode=True)                  # Кодируем признаки
+        df = self.normalize_features(df, train_mode=True)               # Нормализация бд
         logger.info(f"Нормализованная БД (первые 5 строк):\n{df.head()}")
 
         # Визуализация, создание и сохранение векторов
-        vectors = self.create_vectors(df)                                                           # Создание
-        self.visualize_vectors(vectors, df, output_path='../results/vectors_visualization.png')     # Визуализация
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        df.to_csv(output_path, index=False)                                                         # Сохранение
+        vectors = self.create_vectors(df)                               # Создание
+        self.visualize_vectors(vectors, df)                             # Визуализация
+        df.to_csv(output_path, index=False)                             # Сохранение
         os.makedirs('../artifacts', exist_ok=True)
         np.save('../artifacts/user_vectors.npy', vectors)
         logger.info(f"Сохранены векторы: ../artifacts/user_vectors.npy")
         logger.info(f"Сохранена векторизованная БД: {output_path}")
 
+        logger.info(f"Созданы векторы размерности: {vectors.shape}")
+        logger.info(f"Пример вектора: {vectors[0]}")
+
         return df, vectors
 
     def retrain_word2vec(
             self,
-            intermediate_path: str = '../data/intermediate_dataset.csv'
+            intermediate_path: str = '../data/intermediate_dataset.csv',
+            output_path: str = '../data/processed_profiles.csv'
     ) -> None:
         """
         Переобучает модель Word2Vec и обновляет job_vector
 
-        :param intermediate_path: Путь до объединённой БД
+        :param intermediate_path: Путь до объединённой БД (Профиль + Текст) в .csv
+        :param output_path: Путь до векторизованной БД в .csv
         """
         # Загрузка данных из intermediate_dataset.csv
         try:
             intermediate_df = pd.read_csv(intermediate_path)
             if 'job.title' not in intermediate_df.columns:
-                logger.error("Столбец 'job.title' отсутствует в intermediate_dataset.csv")
-                raise ValueError("Столбец 'job.title' отсутствует в intermediate_dataset.csv")
+                logger.error(f"Столбец 'job.title' отсутствует в {intermediate_path}")
+                raise ValueError(f"Столбец 'job.title' отсутствует в {intermediate_path}")
         except FileNotFoundError:
             logger.error(f"Файл {intermediate_path} не найден")
             raise FileNotFoundError(f"Файл {intermediate_path} не найден")
@@ -570,8 +569,8 @@ class DataProcessor:
         job_titles = intermediate_df['job.title'].str.lower().str.strip().fillna('').tolist()
         job_titles = [title for title in job_titles if title and isinstance(title, str)]
         if not job_titles:
-            logger.error("Нет валидных job.title в intermediate_dataset.csv")
-            raise ValueError("Нет валидных job.title в intermediate_dataset.csv")
+            logger.error(f"Нет валидных job.title в {intermediate_path}")
+            raise ValueError(f"Нет валидных job.title в {intermediate_path}")
 
         new_sentences = [[title] for title in job_titles]
         logger.info(f"Количество job.title для обучения Word2Vec: {len(new_sentences)}")
@@ -588,9 +587,9 @@ class DataProcessor:
         self.job_model.save('../artifacts/job_word2vec.model')
         logger.info("Сохранена модель Word2Vec: ../artifacts/job_word2vec.model")
 
-        # Обновление job_vector и обработка question_vector в processed_profiles.csv
+        # Обновление финальных векторов в processed_profiles.csv
         try:
-            df = pd.read_csv('../data/processed_profiles.csv')
+            df = pd.read_csv(output_path)
 
             # Обновление job_vector
             df['job_vector'] = intermediate_df['job.title'].str.lower().str.strip().fillna('')
@@ -606,8 +605,8 @@ class DataProcessor:
                 try:
                     clean_str = x.replace('/n', ' ').replace('[', '').replace(']', '')
                     return np.fromstring(clean_str, sep=' ')
-                except Exception as e:
-                    logger.info(f"Ошибка преобразования df['question_vector']: {e}")
+                except Exception as ex:
+                    logger.info(f"Ошибка преобразования df['question_vector']: {ex}")
 
             df['question_vector'] = df['question_vector'].apply(parse_question_vector)
 
@@ -615,10 +614,10 @@ class DataProcessor:
             vectors = self.create_vectors(df)
 
             # Сохранение обновленных данных
-            df.to_csv('../data/processed_profiles.csv', index=False, encoding='utf-8')
+            df.to_csv(output_path, index=False, encoding='utf-8')
             np.save('../artifacts/user_vectors.npy', vectors)
             logger.info(
-                "Обновлены ../data/processed_profiles.csv и ../artifacts/user_vectors.npy после переобучения Word2Vec")
+                f"Обновлены {output_path} и ../artifacts/user_vectors.npy после переобучения Word2Vec")
         except Exception as e:
             logger.error(f"Ошибка обновления векторов после переобучения Word2Vec: {e}")
             raise
@@ -661,7 +660,7 @@ class DataProcessor:
             os.makedirs('../artifacts', exist_ok=True)
             np.save('../artifacts/user_vectors.npy', vectors)
             logger.info(
-                "Обновлены ../data/processed_profiles.csv и ../artifacts/user_vectors.npy после переобучения всех моделей")
+                f"Обновлены {output_path} и ../artifacts/user_vectors.npy после переобучения всех моделей")
         except Exception as e:
             logger.error(f"Ошибка обновления векторов после переобучения всех моделей: {e}")
             raise

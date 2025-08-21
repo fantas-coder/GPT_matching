@@ -21,28 +21,36 @@ class FaissIndexManager:
                  vectors_path: str = '../artifacts/user_vectors.npy',
                  index_path: str = '../artifacts/faiss_index_ivf.index',
                  intermediate_csv: str = '../data/intermediate_dataset.csv',
-                 processed_csv: str = '../data/processed_profiles.csv'):
+                 processed_csv: str = '../data/processed_profiles.csv',
+                 nprobe_path: str = '../artifacts/nprobe.json',
+                 weights_path: str = '../artifacts/weights.json'):
         self.vectors_path = vectors_path
         self.index_path = index_path
         self.intermediate_csv = intermediate_csv
         self.processed_csv = processed_csv
-        self.cache = LRUCache(maxsize=1000)                 # Кеш в памяти
+        self.nprobe_path = nprobe_path
+        self.weights_path = weights_path
+        self.cache = LRUCache(maxsize=1000)                # Кеш в памяти
         self.cache_file = '../artifacts/search_cache.pkl'  # Файл для сохранения кеша
 
         os.makedirs(os.path.dirname(self.intermediate_csv), exist_ok=True)
         os.makedirs(os.path.dirname(self.processed_csv), exist_ok=True)
         os.makedirs('../results', exist_ok=True)
+        os.makedirs(os.path.dirname(self.nprobe_path), exist_ok=True)
 
         self.load_cache()
+        self.load_nprobe()
 
     def build_faiss_ivf_index(
             self,
-            nlist: int = 100
+            nlist: int = 100,
+            nprobe: int = 10
     ) -> faiss.IndexIVFFlat:
         """
         Функция обучает FAISS IndexIVFFlat для ANN-поиска
 
-        :param nlist: Количество кластеров для приближённого (ANN) поиска
+        :param nlist: Количество кластеров в индексе FAISS
+        :param nprobe: Количество кластеров для приближённого (ANN) поиска
         :return: Возвращает обученный индекс FAISS
         """
         if not os.path.exists(self.vectors_path):
@@ -74,6 +82,10 @@ class FaissIndexManager:
         logger.info(f"Добавление {num_elements} векторов в индекс...")
         index.add(vectors)
 
+        # Установка nprobe по умолчанию
+        self.save_nprobe(nprobe)
+        logger.info(f"Значение nprobe установлено по умолчанию {nprobe}")
+
         # Сохранение индекса
         os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
         faiss.write_index(index, self.index_path)
@@ -81,7 +93,7 @@ class FaissIndexManager:
             f"FAISS IndexIVFFlat обучен и сохранен в {self.index_path}. Размерность: {dimension}, пользователей: {num_elements}, кластеров: {nlist}")
         self.cache = LRUCache(maxsize=1000)
         self.save_cache()
-        logger.info("Кеш очищен после перестройки индекса")
+        logger.info("Кеш очищен создания индекса")
         return index
 
     def search_faiss_ivf(
@@ -89,7 +101,8 @@ class FaissIndexManager:
             query_vector: np.ndarray,
             query_user_id: int = None,
             k: int = 50,
-            nprobe: int = 10
+            nprobe: int = None,
+            save_nprobe_flag: bool = True
     ) -> Tuple[List[Dict], List[int], List[float]]:
         """
         Функция ищет топ-K метчей в FAISS IndexIVFFlat
@@ -98,6 +111,7 @@ class FaissIndexManager:
         :param query_user_id: id запрашиваемого пользователя
         :param k: Количество метчей
         :param nprobe: Количество кластеров для приближённого (ANN) поиска
+        :param save_nprobe_flag: Флаг, отвечающий за сохранения nprobe при загрузке
         :return: Возвращает кортеж: список индексов метчей и список расстояния до соответсвующих метчей
         """
         if not os.path.exists(self.index_path):
@@ -124,6 +138,10 @@ class FaissIndexManager:
             raise ValueError(f"Ожидается один вектор запроса, получено: {query_vector.shape[0]}")
 
         # Установка количества кластеров для поиска (баланс скорости/точности)
+        if not nprobe:
+            nprobe = self.load_nprobe()
+        if save_nprobe_flag:
+            self.save_nprobe(nprobe)
         index.nprobe = nprobe
 
         # Поиск
@@ -180,6 +198,7 @@ class FaissIndexManager:
                         f"Вопрос: {res['question']}, X: {res['X']}, Y: {res['Y']}, Z: {res['Z']}, "
                         f"Дистанция: {res['distance']:.4f}")
 
+        # Ранжирование по тематике, стилю и тональности
         query_features = processed_df[processed_df['user_id'] == matches[0]['user_id']][
             ['sentiment_pos', 'sentiment_neu', 'sentiment_neg', 'question_length', 'question_words', 'formality_score', 'topic_norm']
         ].values[0]
@@ -204,7 +223,8 @@ class FaissIndexManager:
             self,
             user_id: int,
             k: int = 50,
-            nprobe: int = 10
+            nprobe: int = None,
+            save_nprobe_flag: bool = True
     ) -> Tuple[List[Dict], List[int], List[float]]:
         """
         Функция ищет топ-K метчей в FAISS IndexIVFFlat по user_id
@@ -212,8 +232,14 @@ class FaissIndexManager:
         :param user_id: id пользователя, для которого выполняется поиск
         :param k: Количество соседних до ранжирования
         :param nprobe: Количество кластеров для приближённого (ANN) поиска
+        :param save_nprobe_flag: Флаг, отвечающий за сохранения nprobe при загрузке
         :return: Возвращает кортеж: список индексов метчей и список расстояния до соответсвующих метчей
         """
+        if not nprobe:
+            nprobe = self.load_nprobe()
+        if save_nprobe_flag:
+            self.save_nprobe(nprobe)
+
         # Проверка кеша
         cache_key = (user_id, k, nprobe)
         if cache_key in self.cache:
@@ -274,7 +300,8 @@ class FaissIndexManager:
             query_features: np.ndarray,
             processed_df: pd.DataFrame,
             top_k: int = 10,
-            weights: Dict[str, float] = None
+            weights: Dict[str, float] = None,
+            save_weights_flag: bool = True
     ) -> List[Dict]:
         """
         Ранжирование метчей на основе признаков (тональность, стиль, тематика)
@@ -284,11 +311,14 @@ class FaissIndexManager:
         :param processed_df: Pandas DataFrame из файла processed_profiles.csv, содержащий нормализованные признаки для всех пользователей
         :param top_k: Количество возвращаемых метчей после ранжирования
         :param weights: Словарь с весами для признаков (sentiment, style, topic)
+        :param save_weights_flag: Флаг, отвечающий за сохранения используемых весов в файл
         :return: Список из top_k словарей с метаданными матчей, дополненных полем relevance_score (скор релевантности)
         """
         # Настройка весов
         if weights is None:
-            weights = {'sentiment': 0.4, 'style': 0.4, 'topic': 0.2}
+            weights = self.load_weights()
+        if save_weights_flag:
+            self.save_weights(weights)
 
         if not all(k in weights for k in ['sentiment', 'style', 'topic']):
             logger.error("Веса должны содержать ключи: 'sentiment', 'style', 'topic'")
@@ -399,3 +429,71 @@ class FaissIndexManager:
             logger.info(f"Кеш сохранен в {self.cache_file}")
         except Exception as e:
             logger.error(f"Ошибка сохранения кеша: {e}")
+
+    def load_nprobe(self) -> int:
+        """
+        Загружает значение nprobe из файла, если он существует.
+        """
+        try:
+            if os.path.exists(self.nprobe_path):
+                with open(self.nprobe_path, 'r') as f:
+                    data = json.load(f)
+                    nprobe = int(data.get('nprobe', 10))
+                    logger.info(f"Загружено nprobe={nprobe} из {self.nprobe_path}")
+                    return nprobe
+            else:
+                logger.info(f"Файл {self.nprobe_path} не найден, используется nprobe=10 по умолчанию")
+                return 10
+        except Exception as e:
+            logger.error(f"Ошибка загрузки nprobe из {self.nprobe_path}: {e}")
+            return 10
+
+    def save_nprobe(self, nprobe: int) -> None:
+        """
+        Сохраняет значение nprobe в файл.
+        """
+        try:
+            with open(self.nprobe_path, 'w') as f:
+                json.dump({'nprobe': nprobe}, f)
+            logger.info(f"Сохранено nprobe={nprobe} в {self.nprobe_path}")
+        except Exception as e:
+            logger.error(f"Ошибка сохранения nprobe в {self.nprobe_path}: {e}")
+
+    def load_weights(self) -> Dict[str, float]:
+        """
+        Загружает веса из файла, если он существует.
+        """
+        default_weights = {'sentiment': 0.4, 'style': 0.4, 'topic': 0.2}
+        try:
+            if os.path.exists(self.weights_path):
+                with open(self.weights_path, 'r') as f:
+                    data = json.load(f)
+                    if all(k in data for k in ['sentiment', 'style', 'topic']):
+                        weights = {k: float(data[k]) for k in ['sentiment', 'style', 'topic']}
+                        logger.info(f"Загружены веса из {self.weights_path}: {weights}")
+                        if abs(sum(weights.values()) - 1.0) > 1e-6:
+                            logger.warning(
+                                f"Переданные веса не нормализованы (сумма: {sum(weights.values())}), используются веса по умолчанию: {default_weights}")
+                            return default_weights
+                        return weights
+                    else:
+                        logger.warning(
+                            f"Некорректный формат весов в {self.weights_path}, используются веса по умолчанию")
+                        return default_weights
+            else:
+                logger.info(f"Файл {self.weights_path} не найден, используются веса по умолчанию: {default_weights}")
+                return default_weights
+        except Exception as e:
+            logger.error(f"Ошибка загрузки весов из {self.weights_path}: {e}")
+            return default_weights
+
+    def save_weights(self, weights: Dict[str, float]) -> None:
+        """
+        Сохраняет веса в файл.
+        """
+        try:
+            with open(self.weights_path, 'w') as f:
+                json.dump(weights, f)
+            logger.info(f"Сохранены веса в {self.weights_path}: {weights}")
+        except Exception as e:
+            logger.error(f"Ошибка сохранения весов в {self.weights_path}: {e}")
