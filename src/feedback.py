@@ -8,15 +8,15 @@ logger = logging.getLogger(__name__)
 
 class FeedbackManager:
     def __init__(self, processor, faiss_manager, weights: Dict[str, float] = None):
-        self.processor = processor    # Экземпляр DataProcessor для переобучения моделей
-        self.faiss_manager = faiss_manager      # Экземпляр FaissIndexManager
+        self.processor = processor
+        self.faiss_manager = faiss_manager
         self.weights = weights if weights else {'sentiment': 0.4, 'style': 0.4, 'topic': 0.2}
         self.best_matches = []
         self.good_matches = []
         self.medium_matches = []
         self.bad_matches = []
         self.very_bad_matches = []
-        self.output_dir = '../data'
+        self.output_dir = '../data/saved_matches'
         os.makedirs(self.output_dir, exist_ok=True)
 
     def collect_feedback(
@@ -65,7 +65,7 @@ class FeedbackManager:
         4- изменяем веса ранжирования
         3- изменяем кол-во кластеров поиска
         2- переобучаем word2vec + п.3
-        1- переобучаем все модели + п.3
+        1- переобучаем word2vec + п.2
 
         :param user_id_query: ID пользователя запроса
         :param matches: Список словарей с данными матчей
@@ -95,37 +95,48 @@ class FeedbackManager:
             logger.info(f"Добавлено {len(match_data_list)} матчей в лучшие примеры")
         elif rating == 4:
             self.good_matches.extend(match_data_list)
-            self.weights['style'] = min(self.weights['style'] + 0.05, 1.0)
-            total = self.weights['style'] + self.weights['sentiment'] + self.weights['topic']
-            self.weights = {k: v / total for k, v in self.weights.items()}
             self.save_matches(self.good_matches, 'good_matches.csv')
+            weights = self.faiss_manager.load_weights()
+            weights['style'] = min(weights['style'] + 0.05, 1.0)
+            total = weights['style'] + weights['sentiment'] + weights['topic']
+            weights = {k: v / total for k, v in weights.items()}
+            self.faiss_manager.save_weights(weights)
             logger.info(
-                f"Увеличен вес стиля: {self.weights['style']:.2f}, сохранено {len(match_data_list)} матчей в good_matches.csv")
+                f"Увеличен вес стиля: {weights['style']:.2f}, сохранено {len(match_data_list)} матчей в good_matches.csv")
         elif rating == 3:
             self.medium_matches.extend(match_data_list)
-            self.faiss_manager.nprobe = min(getattr(self.faiss_manager, 'nprobe', 10) + 5, 50)
             self.save_matches(self.medium_matches, 'medium_matches.csv')
+            nprobe = min(self.faiss_manager.load_nprobe() + 5, 50)
+            self.faiss_manager.save_nprobe(nprobe)
             logger.info(
-                f"Увеличен nprobe до {self.faiss_manager.nprobe}, сохранено {len(match_data_list)} матчей в medium_matches.csv")
+                f"Увеличен nprobe до {nprobe}, сохранено {len(match_data_list)} матчей в medium_matches.csv")
         elif rating == 2:
             self.bad_matches.extend(match_data_list)
             self.save_matches(self.bad_matches, 'bad_matches.csv')
-            self.faiss_manager.nprobe = min(getattr(self.faiss_manager, 'nprobe', 10) + 5, 50)
+            nprobe = min(self.faiss_manager.load_nprobe() + 5, 50)
+            self.faiss_manager.save_nprobe(nprobe)
+            logger.info(
+                f"Увеличен nprobe до {nprobe}, сохранено {len(match_data_list)} матчей в medium_matches.csv")
             try:
                 self.processor.retrain_word2vec()
-                logger.info("Word2Vec переобучен на плохих примерах")
+                logger.info("Word2Vec переобучен")
             except Exception as e:
                 logger.error(f"Ошибка переобучения Word2Vec: {e}")
         elif rating == 1:
             self.very_bad_matches.extend(match_data_list)
             self.save_matches(self.very_bad_matches, 'very_bad_matches.csv')
             try:
-                self.processor.retrain_all_models()
-                self.faiss_manager.build_faiss_ivf_index()
-                self.faiss_manager.nprobe = min(getattr(self.faiss_manager, 'nprobe', 10) + 5, 50)
-                logger.info(f"Все модели и FAISS переобучены, nprobe увеличен до {self.faiss_manager.nprobe}")
+                self.processor.retrain_word2vec()
+                logger.info("Word2Vec переобучен")
             except Exception as e:
-                logger.error(f"Ошибка переобучения моделей и FAISS: {e}")
+                logger.error(f"Ошибка переобучения Word2Vec: {e}")
+            try:
+                self.faiss_manager.build_faiss_ivf_index()
+                nprobe = min(self.faiss_manager.load_nprobe() + 5, 50)
+                self.faiss_manager.save_nprobe(nprobe)
+                logger.info(f"FAISS переобучен, nprobe увеличен до {nprobe}")
+            except Exception as e:
+                logger.error(f"Ошибка переобучения FAISS: {e}")
 
     def save_matches(
             self,

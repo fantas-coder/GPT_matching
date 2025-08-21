@@ -18,8 +18,8 @@ def add_new_record(
         processor: DataProcessor = None,
         faiss_manager: FaissIndexManager = None,
         intermediate_path: str = '../data/intermediate_dataset.csv',
-        existing_csv: str = '../data/processed_profiles.csv',
-        existing_vectors: str = '../artifacts/user_vectors.npy',
+        vectors_csv: str = '../data/processed_profiles.csv',
+        vectors_path: str = '../artifacts/user_vectors.npy',
         index_path: str = '../artifacts/faiss_index_ivf.index',
         nlist: int = 100
 ) -> Tuple[pd.DataFrame, np.ndarray]:
@@ -30,8 +30,8 @@ def add_new_record(
     :param processor: Экземпляр класса обработки БД
     :param faiss_manager: Экземпляр класса обучения FAISS
     :param intermediate_path: Объединённая БД (Профиль + Текст)
-    :param existing_csv: Путь до текущей векторизованной БД
-    :param existing_vectors: Путь до текущих финальных векторов
+    :param vectors_csv: Путь до текущей векторизованной БД
+    :param vectors_path: Путь до текущих финальных векторов
     :param index_path: Путь до обученного индекса FAISS
     :param nlist: Количество кластеров для обучения FAISS
     :return: Кортеж новой векторизованной БД и новых финальных векторов
@@ -76,7 +76,7 @@ def add_new_record(
 
     # Создание DataFrame для новой записи
     new_df = pd.DataFrame([record])
-    new_df['user_id'] = new_df.index + (pd.read_csv(existing_csv)['user_id'].max() + 1 if os.path.exists(existing_csv) else 0)
+    new_df['user_id'] = new_df.index + (pd.read_csv(vectors_csv)['user_id'].max() + 1 if os.path.exists(vectors_csv) else 0)
 
     # Кодирование и нормализация
     new_df = processor.encode_features(new_df, train_mode=False)
@@ -93,9 +93,9 @@ def add_new_record(
         new_vector = new_vector.astype('float32')
 
     # Загрузка существующих данных
-    if os.path.exists(existing_csv) and os.path.exists(existing_vectors):
-        existing_df = pd.read_csv(existing_csv)
-        existing_vectors_array = np.load(existing_vectors, allow_pickle=False)
+    if os.path.exists(vectors_csv) and os.path.exists(vectors_path):
+        existing_df = pd.read_csv(vectors_csv)
+        existing_vectors_array = np.load(vectors_path, allow_pickle=False)
         if existing_vectors_array.dtype != np.float32:
             existing_vectors_array = existing_vectors_array.astype('float32')
         if new_vector.shape[1] != existing_vectors_array.shape[1]:
@@ -120,12 +120,13 @@ def add_new_record(
         logger.info(f"Промежуточная БД обновлена в {intermediate_path}")
 
     # Сохранение обновленных данных
-    os.makedirs(os.path.dirname(existing_csv), exist_ok=True)
-    updated_df.to_csv(existing_csv, index=False)
-    os.makedirs(os.path.dirname(existing_vectors), exist_ok=True)
-    np.save(existing_vectors, updated_vectors)
+    os.makedirs(os.path.dirname(vectors_csv), exist_ok=True)
+    updated_df.to_csv(vectors_csv, index=False)
 
-    # Инициализация процессора, если он не создан
+    os.makedirs(os.path.dirname(vectors_path), exist_ok=True)
+    np.save(vectors_path, updated_vectors)
+
+    # Инициализация Faiss, если он не создан
     if faiss_manager is None:
         faiss_manager = FaissIndexManager()
 
@@ -147,7 +148,10 @@ def add_new_record(
     logger.info("Кеш очищен после добавления новой записи")
 
     logger.info(
-        f"Новая запись добавлена. Обновлены {existing_csv}, {existing_vectors}, {intermediate_path}, {index_path}")
+        f"Новая запись добавлена. Обновлены {vectors_csv}, {vectors_path}, {intermediate_path}, {index_path}")
+    logger.info(f"Обновленная БД:\n{updated_df.tail(1)}")
+    logger.info(f"Обновленные векторы размерностью: {updated_vectors.shape}")
+
     return updated_df, updated_vectors
 
 
@@ -160,11 +164,11 @@ def main(train_flag=False):
     if train_flag:
         df, vectors = processor.process_data(
             input_path='../data/atlanta_salary_data_2015_full.csv',
-            output_path='../data/processed_profiles.csv',
-            intermediate_path='../data/intermediate_dataset.csv'
+            prepared_path='../data/prepared_data.csv',
+            intermediate_path='../data/intermediate_dataset.csv',
+            output_path='../data/processed_profiles.csv'
         )
-        logger.info(f"Созданы векторы размерности: {vectors.shape}")
-        logger.info(f"Пример вектора: {vectors[0]}")
+
         faiss_manager.build_faiss_ivf_index()
     else:
         # Пример добавления новой записи
@@ -179,9 +183,11 @@ def main(train_flag=False):
             'Y': np.random.randint(0, 1001),
             'Z': np.random.randint(0, 1001)
         }
-        df, vectors = add_new_record(record=new_record, processor=processor, faiss_manager=faiss_manager)
-        logger.info(f"Обновленная БД:\n{df.tail(1)}")
-        logger.info(f"Обновленные векторы размерностью: {vectors.shape}")
+        df, vectors = add_new_record(
+            record=new_record,
+            processor=processor,
+            faiss_manager=faiss_manager
+        )
 
     # Пример поиска по user_id
     # df = pd.read_csv("../data/processed_profiles.csv")
@@ -203,4 +209,4 @@ def main(train_flag=False):
 
 
 if __name__ == "__main__":
-    main(train_flag=True)
+    main(train_flag=False)
