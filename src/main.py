@@ -1,5 +1,5 @@
 # Конфигурация
-from src.config import os, pd, np, logging, Tuple
+from src.config import os, pd, np, logging, Tuple, Dict
 from src.data_processing import DataProcessor
 from src.ANN_search import FaissIndexManager
 from src.feedback import FeedbackManager
@@ -155,14 +155,28 @@ def add_new_record(
     return updated_df, updated_vectors
 
 
-def main(train_flag=False):
+def main(
+        train_flag: bool = False,
+        new_record: Dict = None,
+        is_search_for_new_record: bool = False,
+        user_id: int = None,
+        is_visualize: bool = False
+) -> None:
+    """
+    Основная функция программы
+
+    :param train_flag: True - проводить векторизацию исходной БД и сохранять результаты, False - брать векторизованную БД из файлов
+    :param new_record: Если НЕ None, то добавляет нового пользователя в векторизованную БД из файла
+    :param is_search_for_new_record: True - выполняет поиск то 10 метчей для нового пользователя, если new_record не None, False - ничего не делать
+    :param user_id: Если НЕ None, то производит поиск топ 10 метчей для пользователя по id и собирает оценку
+    :param is_visualize: True - создать график векторизованной БД в 2Д, False - ничего не делать
+    """
     processor = DataProcessor()
-    processor.load_artifacts()
     faiss_manager = FaissIndexManager()
     feedback_manager = FeedbackManager(processor=processor, faiss_manager=faiss_manager)
 
     if train_flag:
-        df, vectors = processor.process_data(
+        _, _ = processor.process_data(
             input_path='../data/atlanta_salary_data_2015_full.csv',
             prepared_path='../data/prepared_data.csv',
             intermediate_path='../data/intermediate_dataset.csv',
@@ -170,43 +184,64 @@ def main(train_flag=False):
         )
 
         faiss_manager.build_faiss_ivf_index()
-    else:
-        # Пример добавления новой записи
-        new_record = {
-            'age': 22,
-            'sex': 'Male',
-            'job.title': 'ml data scientist',
-            'organization': 'yandex',
-            'annual.salary': 300000,
-            'question': 'Привет! Хочу найти топ 10 метчей для меня',
-            'X': np.random.randint(0, 1001),
-            'Y': np.random.randint(0, 1001),
-            'Z': np.random.randint(0, 1001)
-        }
-        df, vectors = add_new_record(
+
+    if new_record:
+        df, _ = add_new_record(
             record=new_record,
             processor=processor,
             faiss_manager=faiss_manager
         )
 
-    # Пример поиска по user_id
-    # df = pd.read_csv("../data/processed_profiles.csv")
-    user_id = df['user_id'].iloc[-1]  # Берем user_id последней записи
-    ranked_matches, indices, distances = faiss_manager.search_by_user_id(user_id=user_id, k=50)
-    logger.info(f"Ранжированные результаты поиска для user_id {user_id}:")
-    for i, res in enumerate(ranked_matches, 1):
-        logger.info(f"{i}. user_id: {res['user_id']}, Пол: {res['sex']}, "
-                    f"Должность: {res['job.title']}, Организация: {res['organization']}, "
-                    f"Зарплата: {res['annual.salary']}, Возраст: {res['age']}, "
-                    f"Вопрос: {res['question']}, X: {res['X']}, Y: {res['Y']}, Z: {res['Z']}, "
-                    f"Дистанция: {res['distance']:.4f}, Релевантность: {res['relevance_score']:.4f}")
+        if is_search_for_new_record:
+            if user_id:
+                logger.warning(
+                    f"Поиск проводится только по одному id! Перезаписываем user_id {user_id} на user_id новой записи")
+            user_id = df['user_id'].iloc[-1]  # Берем user_id последней (новой) записи
 
-    # Визуализация сохраненных векторов
-    # processor.visualize_saved_vectors()
+    if user_id:
+        ranked_matches, indices, distances = faiss_manager.search_by_user_id(user_id=user_id, k=50)
+        logger.info(f"Ранжированные результаты поиска для user_id {user_id}:")
+        for i, res in enumerate(ranked_matches, 1):
+            logger.info(f"{i}. user_id: {res['user_id']}, Пол: {res['sex']}, "
+                        f"Должность: {res['job.title']}, Организация: {res['organization']}, "
+                        f"Зарплата: {res['annual.salary']}, Возраст: {res['age']}, "
+                        f"Вопрос: {res['question']}, X: {res['X']}, Y: {res['Y']}, Z: {res['Z']}, "
+                        f"Дистанция: {res['distance']:.4f}, Релевантность: {res['relevance_score']:.4f}")
 
-    # Собираем обратную связь
-    feedback_manager.collect_feedback(ranked_matches, user_id)
+        # Собираем обратную связь
+        feedback_manager.collect_feedback(ranked_matches, user_id)
+
+    if is_visualize:
+        # Визуализация сохраненных векторов
+        processor.visualize_saved_vectors()
 
 
 if __name__ == "__main__":
-    main(train_flag=False)
+    # Флаг отвечающий за обучение
+    cur_train_flag = False
+
+    # Пример добавления новой записи
+    cur_new_record = {
+        'age': 22,
+        'sex': 'Male',
+        'job.title': 'ml data scientist',
+        'organization': 'yandex',
+        'annual.salary': 300000,
+        'question': 'Привет! Хочу найти топ 10 метчей для меня',
+        'X': np.random.randint(0, 1001),
+        'Y': np.random.randint(0, 1001),
+        'Z': np.random.randint(0, 1001)
+    }
+
+    # Флаг, отвечающий за поиск метчей для нового пользователя
+    cur_is_search_for_new_record = True
+
+    # Флаг, отвечающий за визуализацию
+    cur_is_visualize = False
+
+    main(
+        train_flag=cur_train_flag,
+        new_record=cur_new_record,
+        is_search_for_new_record=cur_is_search_for_new_record,
+        is_visualize=cur_is_visualize
+    )

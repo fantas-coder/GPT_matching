@@ -65,6 +65,8 @@ class DataProcessor:
             'topic': None
         }
 
+        self.load_artifacts()
+
     def load_artifacts(self) -> None:
         """
         Функция загружает сохраненные модели и нормализаторы из 'artifacts'
