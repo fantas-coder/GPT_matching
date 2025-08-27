@@ -19,7 +19,7 @@ import seaborn as sns
 from sklearn.manifold import TSNE
 
 # Конфигурация
-from src.config import (os, pd, np, tqdm, logging, Tuple, List,
+from config import (os, pd, np, tqdm, logging, Tuple, List,
                         GPT_MODEL_NAME, SENTIMENT_MODEL_TASK, SENTIMENT_MODEL, STYLE_MODEL, QUESTIONS_DATA_BASE)
 
 # Настройка логирования

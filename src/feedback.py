@@ -1,4 +1,4 @@
-from src.config import os, pd, logging, List, Dict
+from config import os, pd, logging, List, Dict
 
 
 # Настройка логирования

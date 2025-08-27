@@ -1,8 +1,11 @@
+import argparse
+import json
+
 # Конфигурация
-from src.config import os, pd, np, logging, Tuple, Dict
-from src.data_processing import DataProcessor
-from src.ANN_search import FaissIndexManager
-from src.feedback import FeedbackManager
+from config import os, pd, np, logging, Tuple, Dict
+from data_processing import DataProcessor
+from ANN_search import FaissIndexManager
+from feedback import FeedbackManager
 
 import faiss
 from cachetools import LRUCache
@@ -217,31 +220,29 @@ def main(
 
 
 if __name__ == "__main__":
-    # Флаг отвечающий за обучение
-    cur_train_flag = False
+    parser = argparse.ArgumentParser(description="GPT Matching System")
+    parser.add_argument("--train", action="store_true", help="Run training and vectorization of the database")
+    parser.add_argument("--new-record", type=str, default=None,
+                        help="New record as JSON string, e.g., '{\"age\": 22, \"sex\": \"Male\", \"job.title\": \"ml data scientist\", \"organization\": \"yandex\", \"annual.salary\": 300000, \"question\": \"Привет! Хочу найти топ 10 метчей для меня\", \"X\": 500, \"Y\": 600, \"Z\": 700}'")
+    parser.add_argument("--search-new", action="store_true", help="Search for matches for a new record")
+    parser.add_argument("--user-id", type=int, default=1, help="User ID to search for top 10 matches")
+    parser.add_argument("--visualize", action="store_true", help="Visualize vectors in 2D")
 
-    # Пример добавления новой записи
-    cur_new_record = {
-        'age': 22,
-        'sex': 'Male',
-        'job.title': 'ml data scientist',
-        'organization': 'yandex',
-        'annual.salary': 300000,
-        'question': 'Привет! Хочу найти топ 10 метчей для меня',
-        'X': np.random.randint(0, 1001),
-        'Y': np.random.randint(0, 1001),
-        'Z': np.random.randint(0, 1001)
-    }
+    args = parser.parse_args()
 
-    # Флаг, отвечающий за поиск метчей для нового пользователя
-    cur_is_search_for_new_record = True
-
-    # Флаг, отвечающий за визуализацию
-    cur_is_visualize = False
+    # Парсим JSON для new_record, если он указан
+    new_record = None
+    if args.new_record:
+        try:
+            new_record = json.loads(args.new_record)
+        except json.JSONDecodeError as e:
+            logging.error(f"Ошибка парсинга JSON для new_record: {e}")
+            raise ValueError("new_record должен быть валидной JSON-строкой")
 
     main(
-        train_flag=cur_train_flag,
-        new_record=cur_new_record,
-        is_search_for_new_record=cur_is_search_for_new_record,
-        is_visualize=cur_is_visualize
+        train_flag=args.train,
+        new_record=new_record,
+        is_search_for_new_record=args.search_new,
+        user_id=args.user_id,
+        is_visualize=args.visualize
     )
