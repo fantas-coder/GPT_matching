@@ -1,14 +1,15 @@
 import argparse
 import json
 
+import torch
+import faiss
+from cachetools import LRUCache
+
 # Конфигурация
 from config import os, pd, np, logging, Tuple, Dict
 from data_processing import DataProcessor
 from ANN_search import FaissIndexManager
 from feedback import FeedbackManager
-
-import faiss
-from cachetools import LRUCache
 
 
 # Настройка логирования
@@ -46,6 +47,16 @@ def add_new_record(
         raise ValueError(f"Отсутствуют обязательные поля: {missing_keys}")
 
     # Валидация данных
+    try:
+        record['age'] = int(record['age'])
+        record['annual.salary'] = float(record['annual.salary'])
+        record['X'] = int(record['X'])
+        record['Y'] = int(record['Y'])
+        record['Z'] = int(record['Z'])
+    except (ValueError, TypeError) as e:
+        logger.error(f"Ошибка приведения типов для полей: {e}")
+        raise ValueError(f"Ошибка приведения типов для полей: {e}")
+
     if record['age'] < 0:
         logger.error("Возраст не может быть отрицательным")
         raise ValueError("Возраст не может быть отрицательным")
@@ -174,6 +185,9 @@ def main(
     :param user_id: Если НЕ None, то производит поиск топ 10 метчей для пользователя по id и собирает оценку
     :param is_visualize: True - создать график векторизованной БД в 2Д, False - ничего не делать
     """
+    logger.info(
+        f"GPU available: {torch.cuda.is_available()}, Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
+
     processor = DataProcessor()
     faiss_manager = FaissIndexManager()
     feedback_manager = FeedbackManager(processor=processor, faiss_manager=faiss_manager)
@@ -230,14 +244,20 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Парсим JSON для new_record, если он указан
+    # Парсим JSON для new_record
     new_record = None
     if args.new_record:
         try:
-            new_record = json.loads(args.new_record)
-        except json.JSONDecodeError as e:
-            logging.error(f"Ошибка парсинга JSON для new_record: {e}")
-            raise ValueError("new_record должен быть валидной JSON-строкой")
+            if os.path.exists(args.new_record):
+                with open(args.new_record, 'r') as f:
+                    new_record = json.load(f)
+                logger.info(f"Загружен JSON из файла: {args.new_record}")
+            else:
+                new_record = json.loads(args.new_record)
+                logger.info("Загружен JSON из строки")
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error(f"Ошибка парсинга JSON для new_record: {e}")
+            raise ValueError("new_record должен быть валидной JSON-строкой или путём к JSON-файлу")
 
     main(
         train_flag=args.train,

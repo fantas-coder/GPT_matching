@@ -3,6 +3,7 @@ import json
 import pickle
 
 # Модели и их инструменты
+import torch
 import faiss
 from sklearn.metrics.pairwise import cosine_similarity
 from cachetools import LRUCache
@@ -32,6 +33,10 @@ class FaissIndexManager:
         self.weights_path = weights_path
         self.cache = LRUCache(maxsize=1000)                # Кеш в памяти
         self.cache_file = '../artifacts/search_cache.pkl'  # Файл для сохранения кеша
+        self.gpu_available = torch.cuda.is_available()
+        self.gpu_id = 0 if self.gpu_available else -1
+        logger.info(
+            f"GPU available for FAISS: {self.gpu_available}, Device: {torch.cuda.get_device_name(0) if self.gpu_available else 'CPU'}")
 
         os.makedirs(os.path.dirname(self.intermediate_csv), exist_ok=True)
         os.makedirs(os.path.dirname(self.processed_csv), exist_ok=True)
@@ -70,6 +75,12 @@ class FaissIndexManager:
         quantizer = faiss.IndexFlatL2(dimension)
         index = faiss.IndexIVFFlat(quantizer, dimension, nlist, faiss.METRIC_L2)
 
+        # Перенос индекса на GPU, если доступен
+        if self.gpu_available:
+            res = faiss.StandardGpuResources()
+            index = faiss.index_cpu_to_gpu(res, self.gpu_id, index)
+            logger.info(f"FAISS index transferred to GPU (device {self.gpu_id})")
+
         # Обучение индекса
         logger.info(f"Обучение FAISS IndexIVFFlat на {num_elements} векторах...")
         if not index.is_trained:
@@ -87,6 +98,7 @@ class FaissIndexManager:
         logger.info(f"Значение nprobe установлено по умолчанию {nprobe}")
 
         # Сохранение индекса
+        cpu_index = faiss.index_gpu_to_cpu(index) if self.gpu_available else index
         os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
         faiss.write_index(index, self.index_path)
         logger.info(
@@ -124,7 +136,12 @@ class FaissIndexManager:
             logger.error(f"Файл {self.processed_csv} не найден")
             raise FileNotFoundError(f"Файл {self.processed_csv} не найден")
 
+        # Загрузка индекса
         index = faiss.read_index(self.index_path)
+        if self.gpu_available:
+            res = faiss.StandardGpuResources()
+            index = faiss.index_cpu_to_gpu(res, self.gpu_id, index)
+            logger.info(f"FAISS index transferred to GPU (device {self.gpu_id}) for search")
 
         # Проверка формы и типа query_vector
         query_vector = np.array(query_vector).astype('float32')

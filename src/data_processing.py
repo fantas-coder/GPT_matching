@@ -6,6 +6,7 @@ import pickle
 from datasets import load_dataset
 
 # Модели для векторизации бд
+import torch
 from gensim.models import Word2Vec
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sentence_transformers import SentenceTransformer
@@ -48,16 +49,19 @@ logger.addHandler(tqdm_handler)
 
 class DataProcessor:
     def __init__(self):
-        self.gpt_model = SentenceTransformer(GPT_MODEL_NAME)  # Модель для эмбедингов текстов
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        logger.info(f"Using device: {self.device}")
+        self.gpt_model = SentenceTransformer(GPT_MODEL_NAME).to(self.device)  # Модель для эмбедингов текстов
         self.job_model = None  # Word2Vec для кодирования признаков
         self.sentiment_model = pipeline(  # Модель для извлечения тональности
             SENTIMENT_MODEL_TASK,
             model=SENTIMENT_MODEL,
             tokenizer=SENTIMENT_MODEL,
-            return_all_scores=True
+            return_all_scores=True,
+            device=0 if self.device.type == 'cuda' else -1
         )
-        self.topic_model = BERTopic(language='russian', verbose=True)  # Модель для извлечения тематики
-        self.nlp = spacy.load(STYLE_MODEL)  # Модель для извлечения стиля
+        self.topic_model = BERTopic(language='russian', verbose=True, embedding_model=self.gpt_model)  # Модель для извлечения тематики
+        self.nlp = spacy.load(STYLE_MODEL, disable=['parser', 'ner'])   # Модель для извлечения стиля
         self.scalers = {  # Параметры для нормализации
             'salary': None,
             'age': None,
@@ -210,20 +214,25 @@ class DataProcessor:
         )
 
         # Векторизация вопросов
-        logger.info("Векторизация вопросов...")
+        logger.info(
+            "Векторизация вопросов на GPU..." if self.device.type == 'cuda' else "Векторизация вопросов на CPU...")
         questions = df['question'].fillna('').tolist()
         # Пакетная обработка
         results = self.gpt_model.encode(
             questions,
             batch_size=32,
             show_progress_bar=True,
-            normalize_embeddings=True
+            normalize_embeddings=True,
+            device=self.device
         )
+        # Перенос результатов на CPU для дальнейшей обработки
+        if isinstance(results, torch.Tensor):
+            results = results.cpu().numpy()
         df['question_vector'] = [results[i] if questions[i] else np.zeros(384) for i in range(len(questions))]
         logger.info("Векторизация вопросов завершена")
 
         # Извлечение тематики
-        logger.info("Извлечение тематики...")
+        logger.info("Извлечение тематики на GPU..." if self.device.type == 'cuda' else "Извлечение тематики на CPU...")
         valid_questions = [q if q else "Пустой вопрос" for q in questions]
         if train_mode:
             try:
