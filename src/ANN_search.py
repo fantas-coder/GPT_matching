@@ -101,7 +101,7 @@ class FaissIndexManager:
         # Сохранение индекса
         cpu_index = faiss.index_gpu_to_cpu(index) if self.gpu_available else index
         os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
-        faiss.write_index(index, self.index_path)
+        faiss.write_index(cpu_index, self.index_path)
         logger.info(
             f"FAISS IndexIVFFlat обучен и сохранен в {self.index_path}. Размерность: {dimension}, пользователей: {num_elements}, кластеров: {nlist}")
         self.cache = LRUCache(maxsize=1000)
