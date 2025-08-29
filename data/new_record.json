@@ -1,0 +1,11 @@
+{
+    "age": 22,
+    "sex": "Male",
+    "job.title": "ml data scientist",
+    "organization": "yandex",
+    "annual.salary": 300000,
+    "question": "Привет! Хочу найти топ 10 метчей для меня",
+    "X": 500,
+    "Y": 600,
+    "Z": 700
+}

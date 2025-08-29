@@ -1,6 +1,6 @@
 {
   "calculate_probabilities": false,
-  "language": "russian",
+  "language": null,
   "low_memory": false,
   "min_topic_size": 10,
   "n_gram_range": [
@@ -12,6 +12,5 @@
   "top_n_words": 10,
   "verbose": true,
   "zeroshot_min_similarity": 0.7,
-  "zeroshot_topic_list": null,
-  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+  "zeroshot_topic_list": null
 }
