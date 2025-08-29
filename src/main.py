@@ -258,7 +258,7 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GPT Matching System")
     parser.add_argument("--train", action="store_true", help="Run training and vectorization of the database")
-    parser.add_argument("--new-record", type=str, default="../data/new_record.json",
+    parser.add_argument("--new-record", type=str, default=None,
                         help="New record as JSON string, e.g., '{\"age\": 22, \"sex\": \"Male\", \"job.title\": \"ml data scientist\", \"organization\": \"yandex\", \"annual.salary\": 300000, \"question\": \"Привет! Хочу найти топ 10 метчей для меня\", \"X\": 500, \"Y\": 600, \"Z\": 700}'")
     parser.add_argument("--search-new", action="store_true", help="Search for matches for a new record")
     parser.add_argument("--user-id", type=int, default=None, help="User ID to search for top 10 matches")
