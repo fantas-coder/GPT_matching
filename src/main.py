@@ -286,6 +286,6 @@ if __name__ == "__main__":
         train_flag=args.train,
         new_record=cur_new_record,
         is_search_for_new_record=args.search_new,
-        user_id=8249,
+        user_id=cur_new_record,
         is_visualize=args.visualize
     )
