@@ -13,6 +13,8 @@ from sentence_transformers import SentenceTransformer
 from bertopic import BERTopic
 from transformers import pipeline
 import spacy
+import nltk
+from nltk.corpus import stopwords
 
 # Визуализация
 import matplotlib.pyplot as plt
@@ -21,7 +23,7 @@ from sklearn.manifold import TSNE
 
 # Конфигурация
 from config import (os, pd, np, tqdm, logging, Tuple, List,
-                        GPT_MODEL_NAME, SENTIMENT_MODEL_TASK, SENTIMENT_MODEL, STYLE_MODEL, QUESTIONS_DATA_BASE)
+                    GPT_MODEL_NAME, SENTIMENT_MODEL_TASK, SENTIMENT_MODEL, STYLE_MODEL, QUESTIONS_DATA_BASE)
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -45,6 +47,10 @@ formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 tqdm_handler = TqdmLoggingHandler()
 tqdm_handler.setFormatter(formatter)
 logger.addHandler(tqdm_handler)
+
+# Загрузка стоп-слов для русского языка
+nltk.download('stopwords')
+STOPWORDS = set(stopwords.words('russian')).union({'кто', 'на', 'что', 'какой', 'как', 'где', 'когда', 'каком', 'какие', 'какого'})
 
 
 class DataProcessor:
@@ -251,6 +257,46 @@ class DataProcessor:
                 topics = [0] * len(valid_questions)
         df['topic'] = topics
 
+        # Извлечение ключевых слов вопросов с помощью spacy
+        logger.info("Извлечение ключевых слов вопросов с помощью spacy...")
+
+        def get_question_keywords(question):
+            try:
+                if pd.notnull(question) and question:
+                    doc = self.nlp(question)
+                    # Извлекаем существительные, прилагательные и глаголы, исключая стоп-слова
+                    keywords = [token.text.lower() for token in doc
+                                if token.pos_ in ['NOUN', 'ADJ', 'VERB']
+                                and token.text.lower() not in STOPWORDS
+                                and len(token.text) > 2]
+                    # Берем до 3 уникальных ключевых слов
+                    keywords = list(dict.fromkeys(keywords))[:3]
+                    return ', '.join(keywords) if keywords else 'не определены'
+                return 'не определены'
+            except Exception as ex:
+                logger.warning(f"Ошибка извлечения ключевых слов для вопроса: {ex}")
+                return 'не определены'
+
+        df['question_keywords'] = df['question'].progress_apply(get_question_keywords)
+
+        # Извлечение ключевых слов тем
+        logger.info("Извлечение ключевых слов тем...")
+
+        def get_topic_keywords(topic_id):
+            try:
+                if topic_id >= 0:  # Пропускаем выбросы (-1)
+                    topic_info = self.topic_model.get_topic(topic_id)
+                    # Фильтруем стоп-слова и короткие слова
+                    keywords = [word[0] for word in topic_info
+                                if word[0].lower() not in STOPWORDS and len(word[0]) > 2][:3]
+                    return ', '.join(keywords) if keywords else 'не определены'
+                return 'не определены'
+            except Exception as ex:
+                logger.warning(f"Ошибка извлечения ключевых слов для темы {topic_id}: {ex}")
+                return 'не определены'
+
+        df['topic_keywords'] = df['topic'].progress_apply(get_topic_keywords)
+
         # Обработка неизвестных тем
         if not train_mode and self.scalers['topic'] is not None:
             max_topic = self.scalers['topic'].data_max_[0]
@@ -291,7 +337,7 @@ class DataProcessor:
             lambda x: pd.Series(extract_style_features(x))
         )
 
-        return df.drop(['job.title', 'sex', 'question', 'job_clean'], axis=1, errors='ignore')
+        return df.drop(['job_clean'], axis=1, errors='ignore')
 
     def normalize_features(
             self,
@@ -349,7 +395,8 @@ class DataProcessor:
             for name, scaler in self.scalers.items():
                 pickle.dump(scaler, open(f'../artifacts/{name}_scaler.pkl', 'wb'))
 
-        return df.drop(['annual.salary', 'age', 'organization', 'topic'], axis=1, errors='ignore')
+        return df.drop(['annual.salary', 'age', 'organization', 'topic', 'sex', 'job.title', 'question',
+                        'question_keywords', 'topic_keywords'], axis=1, errors='ignore')
 
     def create_vectors(
             self,
@@ -526,18 +573,22 @@ class DataProcessor:
         os.makedirs(os.path.dirname(prepared_path), exist_ok=True)
         os.makedirs(os.path.dirname(intermediate_path), exist_ok=True)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
         # Загрузка и объединение данных
         df = self.load_and_preprocess(input_path, prepared_path)        # Загрузка БД профилей
         questions = self.load_questions(len(df))                        # Загрузка тестов
         df['question'] = questions[:len(df)]                            # Объединение в одну БД
 
-        # Сохранение промежуточной БД с вопросами
-        df.to_csv(intermediate_path, index=False, encoding='utf-8')
-        logger.info(f"Промежуточная БД сохранена: {intermediate_path}")
-        logger.info(f"Исходная БД (первые 5 строк):\n{df.head()}")
-
         # Кодирование признаков
         df = self.encode_features(df, train_mode=True)                  # Кодируем признаки
+
+        # Сохранение промежуточной БД с вопросами и ключевыми словами
+        df_intermediate = df[['user_id', 'sex', 'job.title', 'organization', 'annual.salary', 'age',
+                              'question', 'question_keywords', 'topic_keywords', 'X', 'Y', 'Z']]
+        df_intermediate.to_csv(intermediate_path, index=False, encoding='utf-8')
+        logger.info(f"Промежуточная БД сохранена: {intermediate_path}")
+        logger.info(f"Исходная БД (первые 5 строк):\n{df_intermediate.head()}")
+
         df = self.normalize_features(df, train_mode=True)               # Нормализация бд
         logger.info(f"Нормализованная БД (первые 5 строк):\n{df.head()}")
 

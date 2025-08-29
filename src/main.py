@@ -92,8 +92,37 @@ def add_new_record(
     new_df = pd.DataFrame([record])
     new_df['user_id'] = new_df.index + (pd.read_csv(vectors_csv)['user_id'].max() + 1 if os.path.exists(vectors_csv) else 0)
 
-    # Кодирование и нормализация
+    # Кодирование
     new_df = processor.encode_features(new_df, train_mode=False)
+
+    # Формирование новой записи для intermediate_dataset.csv
+    new_intermediate = pd.DataFrame({
+        'user_id': new_df['user_id'],
+        'sex': record['sex'],
+        'job.title': record['job.title'],
+        'organization': record['organization'],
+        'annual.salary': record['annual.salary'],
+        'age': record['age'],
+        'question': record['question'],
+        'question_keywords': new_df['question_keywords'],
+        'topic_keywords': new_df['topic_keywords'],
+        'X': record['X'],
+        'Y': record['Y'],
+        'Z': record['Z']
+    })
+
+    # Обновление intermediate_dataset.csv
+    os.makedirs(os.path.dirname(intermediate_path), exist_ok=True)
+    if os.path.exists(intermediate_path):
+        intermediate_df = pd.read_csv(intermediate_path)
+        updated_intermediate = pd.concat([intermediate_df, new_intermediate], ignore_index=True)
+        updated_intermediate.to_csv(intermediate_path, index=False, encoding='utf-8')
+        logger.info(f"Промежуточная БД обновлена в {intermediate_path}")
+    else:
+        new_intermediate.to_csv(intermediate_path, index=False, encoding='utf-8')
+        logger.info(f"Создана новая промежуточная БД: {intermediate_path}")
+
+    # Нормализация
     new_df = processor.normalize_features(new_df, train_mode=False)
 
     # Создание вектора для новой записи
@@ -122,16 +151,6 @@ def add_new_record(
     else:
         updated_df = new_df
         updated_vectors = new_vector
-
-    # Сохранение промежуточной БД
-    os.makedirs(os.path.dirname(intermediate_path), exist_ok=True)
-    if os.path.exists(intermediate_path):
-        intermediate_df = pd.read_csv(intermediate_path)
-        new_intermediate = pd.DataFrame([record])
-        new_intermediate['user_id'] = new_df['user_id']
-        updated_intermediate = pd.concat([intermediate_df, new_intermediate], ignore_index=True)
-        updated_intermediate.to_csv(intermediate_path, index=False, encoding='utf-8')
-        logger.info(f"Промежуточная БД обновлена в {intermediate_path}")
 
     # Сохранение обновленных данных
     os.makedirs(os.path.dirname(vectors_csv), exist_ok=True)
@@ -239,10 +258,10 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GPT Matching System")
     parser.add_argument("--train", action="store_true", help="Run training and vectorization of the database")
-    parser.add_argument("--new-record", type=str, default=None,
+    parser.add_argument("--new-record", type=str, default="../data/new_record.json",
                         help="New record as JSON string, e.g., '{\"age\": 22, \"sex\": \"Male\", \"job.title\": \"ml data scientist\", \"organization\": \"yandex\", \"annual.salary\": 300000, \"question\": \"Привет! Хочу найти топ 10 метчей для меня\", \"X\": 500, \"Y\": 600, \"Z\": 700}'")
     parser.add_argument("--search-new", action="store_true", help="Search for matches for a new record")
-    parser.add_argument("--user-id", type=int, default=8246, help="User ID to search for top 10 matches")
+    parser.add_argument("--user-id", type=int, default=None, help="User ID to search for top 10 matches")
     parser.add_argument("--visualize", action="store_true", help="Visualize vectors in 2D")
 
     args = parser.parse_args()
@@ -252,10 +271,11 @@ if __name__ == "__main__":
     if args.new_record:
         try:
             if os.path.exists(args.new_record):
-                with open(args.new_record, 'r') as f:
+                with open(args.new_record, 'r', encoding='utf-8') as f:
                     cur_new_record = json.load(f)
                 logger.info(f"Загружен JSON из файла: {args.new_record}")
             else:
+                # Если это строка, убедимся в правильной кодировке
                 cur_new_record = json.loads(args.new_record)
                 logger.info("Загружен JSON из строки")
         except (json.JSONDecodeError, OSError) as e:
@@ -266,6 +286,6 @@ if __name__ == "__main__":
         train_flag=args.train,
         new_record=cur_new_record,
         is_search_for_new_record=args.search_new,
-        user_id=args.user_id,
+        user_id=8249,
         is_visualize=args.visualize
     )

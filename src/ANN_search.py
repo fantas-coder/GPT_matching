@@ -34,8 +34,9 @@ class FaissIndexManager:
         self.weights_path = weights_path
         self.cache = LRUCache(maxsize=1000)                # Кеш в памяти
         self.cache_file = '../artifacts/search_cache.pkl'  # Файл для сохранения кеша
-        self.gpu_available = torch.cuda.is_available()
-        self.gpu_id = 0 if self.gpu_available else -1
+        # lf.gpu_id = 0 if self.gpu_available else -1
+        self.gpu_available = False
+        self.gpu_id = -1
         logger.info(
             f"GPU available for FAISS: {self.gpu_available}, Device: {torch.cuda.get_device_name(0) if self.gpu_available else 'CPU'}")
 
@@ -159,11 +160,14 @@ class FaissIndexManager:
             match_processed['question_vector'].replace('\n', ' ').replace('[', '').replace(']', ''), sep=' ')
         question_similarity = 1 - cosine(query_question_vector, match_question_vector)
         if question_similarity >= 0.8:
-            explanations.append("похожий диалог")
+            keywords_str = match_data.get('question_keywords', 'не определены')
+            explanations.append(
+                f"похожий диалог (сходство: {question_similarity:.2f}, ключевые слова: {keywords_str})")
 
         # Сравнение темы диалога
         if abs(query_processed['topic_norm'] - match_processed['topic_norm']) <= 0.1:
-            explanations.append("похожая тема диалога")
+            topic_keywords = match_data.get('topic_keywords', f"значение: {match_processed['topic_norm']:.2f}")
+            explanations.append(f"похожая тема диалога (тема: {topic_keywords})")
 
         # Сравнение координат X, Y, Z отдельно
         if abs(query_data['X'] - match_data['X']) <= 100:
@@ -254,6 +258,8 @@ class FaissIndexManager:
                         'annual.salary': float(user_data.get('annual.salary', 0)),
                         'age': int(user_data.get('age', 0)),
                         'question': str(user_data.get('question', 'N/A')),
+                        'question_keywords': str(user_data.get('question_keywords', 'не определены')),
+                        'topic_keywords': str(user_data.get('topic_keywords', 'не определены')),
                         'X': int(user_data.get('X', 0)),
                         'Y': int(user_data.get('Y', 0)),
                         'Z': int(user_data.get('Z', 0)),
@@ -268,6 +274,8 @@ class FaissIndexManager:
                         'annual.salary': 0.0,
                         'age': 0,
                         'question': 'N/A',
+                        'question_keywords': 'не определены',
+                        'topic_keywords': 'не определены',
                         'X': 0,
                         'Y': 0,
                         'Z': 0,
@@ -383,13 +391,15 @@ class FaissIndexManager:
                 'sex': match['sex'],
                 'job.title': match['job.title'],
                 'organization': match['organization'],
-                'annual.salary': match['annual.salary'],
-                'age': match['age'],
+                'annual.salary': float(match['annual.salary']),
+                'age': int(match['age']),
                 'question': match['question'],
-                'X': match['X'],
-                'Y': match['Y'],
-                'Z': match['Z'],
-                'distance': match['distance'],
+                'question_keywords': match['question_keywords'],
+                'topic_keywords': match['topic_keywords'],
+                'X': int(match['X']),
+                'Y': int(match['Y']),
+                'Z': int(match['Z']),
+                'distance': float(match['distance']),
                 'relevance_score': float(relevance_score),
                 '_match_processed': match_processed  # Временное хранение для генерации объяснений
             })
@@ -410,14 +420,16 @@ class FaissIndexManager:
             final_matches.append(r_match)
 
         # Вывод и сохранение результатов
-        logger.info(f"\nТоп-{len(final_matches)} метчей после ранжирования:")
-        for i, r_match in enumerate(final_matches, 1):
-            logger.info(f"{i}. user_id: {r_match['user_id']}, Пол: {r_match['sex']}, "
-                        f"Должность: {r_match['job.title']}, Организация: {r_match['organization']}, "
-                        f"Зарплата: {r_match['annual.salary']}, Возраст: {r_match['age']}, "
-                        f"Вопрос: {r_match['question']}, X: {r_match['X']}, Y: {r_match['Y']}, Z: {r_match['Z']}, "
-                        f"Дистанция: {r_match['distance']:.4f}, Релевантность: {r_match['relevance_score']:.4f}, "
-                        f"Объяснение: {r_match['explanation']}")
+        logger.info(f"\nТоп-{len(final_matches)} матчей после ранжирования:")
+        for i, match in enumerate(final_matches, 1):
+            logger.info(f"{i}. user_id: {match['user_id']}, Пол: {match['sex']}, "
+                        f"Должность: {match['job.title']}, Организация: {match['organization']}, "
+                        f"Зарплата: {match['annual.salary']}, Возраст: {match['age']}, "
+                        f"Вопрос: {match['question']}, Ключевые слова вопроса: {match['question_keywords']}, "
+                        f"Ключевые слова темы: {match['topic_keywords']}, "
+                        f"X: {match['X']}, Y: {match['Y']}, Z: {match['Z']}, "
+                        f"Дистанция: {match['distance']:.4f}, Релевантность: {match['relevance_score']:.4f}, "
+                        f"Объяснение: {match['explanation']}")
 
         return final_matches
 
