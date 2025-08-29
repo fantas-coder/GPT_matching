@@ -7,6 +7,7 @@ import torch
 import faiss
 from sklearn.metrics.pairwise import cosine_similarity
 from cachetools import LRUCache
+from scipy.spatial.distance import cosine
 
 # Конфигурация
 from config import os, pd, np, logging, Tuple, List, Dict
@@ -108,6 +109,74 @@ class FaissIndexManager:
         logger.info("Кеш очищен создания индекса")
         return index
 
+    def generate_explanation(
+            self,
+            query_data: pd.Series,
+            match_data: pd.Series,
+            query_processed: pd.Series,
+            match_processed: pd.Series
+    ) -> str:
+        """
+        Генерирует объяснение для матча, сравнивая запрашиваемого пользователя с матчом.
+
+        :param query_data: Данные запрашиваемого пользователя из intermediate_df (pd.Series)
+        :param match_data: Данные матча из intermediate_df (pd.Series)
+        :param query_processed: Векторизованные данные запрашиваемого пользователя из processed_df (pd.Series)
+        :param match_processed: Векторизованные данные матча из processed_df (pd.Series)
+        :return: Текстовое объяснение
+        """
+        explanations = []
+
+        # Сравнение возраста
+        if abs(query_data['age'] - match_data['age']) <= 5:
+            explanations.append(f"похожий возраст ({match_data['age']} лет)")
+
+        # Сравнение пола
+        if query_data['sex'] == match_data['sex']:
+            explanations.append(f"одинаковый пол ({match_data['sex']})")
+
+        # Сравнение должности (косинусное сходство job_vector)
+        query_job_vector = np.fromstring(
+            query_processed['job_vector'].replace('\n', ' ').replace('[', '').replace(']', ''), sep=' ')
+        match_job_vector = np.fromstring(
+            match_processed['job_vector'].replace('\n', ' ').replace('[', '').replace(']', ''), sep=' ')
+        job_similarity = 1 - cosine(query_job_vector, match_job_vector)
+        if job_similarity >= 0.8:
+            explanations.append(f"похожая должность ({match_data['job.title']})")
+
+        # Сравнение организации
+        if query_data['organization'] == match_data['organization']:
+            explanations.append(f"одинаковая организация ({match_data['organization']})")
+
+        # Сравнение зарплаты
+        if abs(query_data['annual.salary'] - match_data['annual.salary']) <= 0.2 * query_data['annual.salary']:
+            explanations.append(f"похожая зарплата ({match_data['annual.salary']})")
+
+        # Сравнение диалога (косинусное сходство question_vector)
+        query_question_vector = np.fromstring(
+            query_processed['question_vector'].replace('\n', ' ').replace('[', '').replace(']', ''), sep=' ')
+        match_question_vector = np.fromstring(
+            match_processed['question_vector'].replace('\n', ' ').replace('[', '').replace(']', ''), sep=' ')
+        question_similarity = 1 - cosine(query_question_vector, match_question_vector)
+        if question_similarity >= 0.8:
+            explanations.append("похожий диалог")
+
+        # Сравнение темы диалога
+        if abs(query_processed['topic_norm'] - match_processed['topic_norm']) <= 0.1:
+            explanations.append("похожая тема диалога")
+
+        # Сравнение координат X, Y, Z отдельно
+        if abs(query_data['X'] - match_data['X']) <= 100:
+            explanations.append(f"похожая координата X ({match_data['X']})")
+        if abs(query_data['Y'] - match_data['Y']) <= 100:
+            explanations.append(f"похожая координата Y ({match_data['Y']})")
+        if abs(query_data['Z'] - match_data['Z']) <= 100:
+            explanations.append(f"похожая координата Z ({match_data['Z']})")
+
+        if explanations:
+            return f"Этот пользователь подходит, потому что у вас {', '.join(explanations)}."
+        return "Этот пользователь подходит по общим характеристикам профиля и диалога."
+
     def search_faiss_ivf(
             self,
             query_vector: np.ndarray,
@@ -176,7 +245,6 @@ class FaissIndexManager:
                     continue  # Пропускаем запись с тем же user_id, что и запрос
                 user_data = intermediate_df[intermediate_df['user_id'] == proc_user_id]
                 if not user_data.empty:
-                    # Проверяем, есть ли user_id в исходной базе
                     user_data = user_data.iloc[0]
                     matches.append({
                         'user_id': int(user_data['user_id']),
@@ -216,25 +284,142 @@ class FaissIndexManager:
                         f"Дистанция: {res['distance']:.4f}")
 
         # Ранжирование по тематике, стилю и тональности
-        query_features = processed_df[processed_df['user_id'] == matches[0]['user_id']][
-            ['sentiment_pos', 'sentiment_neu', 'sentiment_neg', 'question_length', 'question_words', 'formality_score', 'topic_norm']
-        ].values[0]
-
-        feature_columns = ['sentiment_pos', 'sentiment_neu', 'sentiment_neg', 'question_length', 'question_words',
-                           'formality_score', 'topic_norm']
-        if query_features.shape != (len(feature_columns),):
-            logger.error(
-                f"Ожидается query_features размерности ({(len(feature_columns),)}), получено: {query_features.shape}")
-            raise ValueError(
-                f"Ожидается query_features размерности ({(len(feature_columns),)}), получено: {query_features.shape}")
-
-        ranked_matches = self.rank_matches(matches, query_features, processed_df, top_k=10)
+        ranked_matches = self.rank_matches(matches, intermediate_df, processed_df, query_user_id, top_k=10)
 
         with open(f'../results/search_results_user_{query_user_id}.json', 'w', encoding='utf-8') as f:
             json.dump(ranked_matches, f, ensure_ascii=False, indent=4)
         logger.info(f"Результаты поиска для user_id {query_user_id} сохранены в ../results/search_results_user_{query_user_id}.json")
 
         return ranked_matches, indices[0].tolist(), distances[0].tolist()
+
+    def rank_matches(
+            self,
+            matches: List[Dict],
+            intermediate_df: pd.DataFrame,
+            processed_df: pd.DataFrame,
+            query_user_id: int,
+            top_k: int = 10,
+            weights: Dict[str, float] = None,
+            save_weights_flag: bool = True
+    ) -> List[Dict]:
+        """
+        Ранжирование метчей на основе признаков (тональность, стиль, тематика)
+
+        :param matches: Список словарей, где каждый словарь — это матч от FAISS
+        :param intermediate_df: Pandas DataFrame из файла intermediate_dataset.csv
+        :param processed_df: Pandas DataFrame из файла processed_profiles.csv
+        :param query_user_id: ID запрашиваемого пользователя
+        :param top_k: Количество возвращаемых метчей после ранжирования
+        :param weights: Словарь с весами для признаков (sentiment, style, topic)
+        :param save_weights_flag: Флаг, отвечающий за сохранения используемых весов в файл
+        :return: Список из top_k словарей с метаданными матчей, дополненных полем relevance_score и explanation
+        """
+        # Настройка весов
+        if weights is None:
+            weights = self.load_weights()
+        if save_weights_flag:
+            self.save_weights(weights)
+
+        if not all(k in weights for k in ['sentiment', 'style', 'topic']):
+            logger.error("Веса должны содержать ключи: 'sentiment', 'style', 'topic'")
+            raise ValueError("Веса должны содержать ключи: 'sentiment', 'style', 'topic'")
+        if abs(sum(weights.values()) - 1.0) > 1e-6:
+            logger.error("Сумма весов должна быть равна 1")
+            raise ValueError("Сумма весов должна быть равна 1")
+
+        # Проверка входных данных
+        feature_columns = ['sentiment_pos', 'sentiment_neu', 'sentiment_neg',
+                           'question_length', 'question_words', 'formality_score', 'topic_norm']
+        missing_columns = [col for col in feature_columns if col not in processed_df.columns]
+        if missing_columns:
+            logger.error(f"Отсутствуют столбцы в processed_df: {missing_columns}")
+            raise ValueError(f"Отсутствуют столбцы в processed_df: {missing_columns}")
+
+        # Получение данных запрашиваемого пользователя
+        query_row = processed_df[processed_df['user_id'] == query_user_id]
+        if query_row.empty:
+            logger.error(f"Пользователь с user_id {query_user_id} не найден в processed_df")
+            raise ValueError(f"Пользователь с user_id {query_user_id} не найден в processed_df")
+        query_processed = query_row.iloc[0]
+        query_data = intermediate_df[intermediate_df['user_id'] == query_user_id]
+        if query_data.empty:
+            logger.error(f"Пользователь с user_id {query_user_id} не найден в intermediate_df")
+            raise ValueError(f"Пользователь с user_id {query_user_id} не найден в intermediate_df")
+        query_data = query_data.iloc[0]
+
+        # Ранжирование метчей
+        ranked_matches = []
+        for match in matches:
+            user_id = match['user_id']
+            match_row = processed_df[processed_df['user_id'] == user_id]
+            if match_row.empty:
+                continue
+            match_processed = match_row.iloc[0]
+
+            # Вычисление скора релевантности
+            # Тональность первые три признака (sentiment_pos, sentiment_neu, sentiment_neg)
+            sentiment_query = query_processed[['sentiment_pos', 'sentiment_neu', 'sentiment_neg']].values.reshape(1, -1)
+            sentiment_match = match_processed[['sentiment_pos', 'sentiment_neu', 'sentiment_neg']].values.reshape(1, -1)
+            sentiment_score = cosine_similarity(sentiment_query, sentiment_match)[0][0]
+            # Стиль - следующие три признака (question_length, question_words, formality_score)
+            style_query = query_processed[['question_length', 'question_words', 'formality_score']].values.reshape(1, -1)
+            style_match = match_processed[['question_length', 'question_words', 'formality_score']].values.reshape(1, -1)
+            style_score = cosine_similarity(style_query, style_match)[0][0]
+            # Тематика - нормализованное значение темы (topic_norm)
+            topic_query = query_processed['topic_norm']
+            topic_match = match_processed['topic_norm']
+            topic_score = 1.0 if abs(topic_query - topic_match) < 0.1 else 0.5
+
+            # Взвешенная сумма
+            relevance_score = (
+                    weights['sentiment'] * sentiment_score +
+                    weights['style'] * style_score +
+                    weights['topic'] * topic_score
+            )
+
+            # Формирование результата без объяснения
+            ranked_matches.append({
+                'user_id': match['user_id'],
+                'sex': match['sex'],
+                'job.title': match['job.title'],
+                'organization': match['organization'],
+                'annual.salary': match['annual.salary'],
+                'age': match['age'],
+                'question': match['question'],
+                'X': match['X'],
+                'Y': match['Y'],
+                'Z': match['Z'],
+                'distance': match['distance'],
+                'relevance_score': float(relevance_score),
+                '_match_processed': match_processed  # Временное хранение для генерации объяснений
+            })
+
+        # Сортировка и выбор топ-k
+        ranked_matches = sorted(ranked_matches, key=lambda x: x['relevance_score'], reverse=True)[:top_k]
+
+        # Генерация объяснений только для топ-k матчей
+        final_matches = []
+        for r_match in ranked_matches:
+            match_processed = r_match.pop('_match_processed')  # Извлекаем и удаляем временное поле
+            match_data = intermediate_df[intermediate_df['user_id'] == r_match['user_id']]
+            if match_data.empty:
+                continue
+            match_data = match_data.iloc[0]
+            explanation = self.generate_explanation(query_data, match_data, query_processed, match_processed)
+            r_match['explanation'] = explanation
+            final_matches.append(r_match)
+
+        # Вывод и сохранение результатов
+        logger.info(f"\nТоп-{len(final_matches)} метчей после ранжирования:")
+        for i, r_match in enumerate(final_matches, 1):
+            logger.info(f"{i}. user_id: {r_match['user_id']}, Пол: {r_match['sex']}, "
+                        f"Должность: {r_match['job.title']}, Организация: {r_match['organization']}, "
+                        f"Зарплата: {r_match['annual.salary']}, Возраст: {r_match['age']}, "
+                        f"Вопрос: {r_match['question']}, X: {r_match['X']}, Y: {r_match['Y']}, Z: {r_match['Z']}, "
+                        f"Дистанция: {r_match['distance']:.4f}, Релевантность: {r_match['relevance_score']:.4f}, "
+                        f"Объяснение: {r_match['explanation']}")
+
+        return final_matches
 
     def search_by_user_id(
             self,
@@ -310,112 +495,6 @@ class FaissIndexManager:
         logger.info(f"Результаты для user_id={user_id}, k={k}, nprobe={nprobe} добавлены в кеш")
 
         return ranked_matches, indices, distances
-
-    def rank_matches(
-            self,
-            matches: List[Dict],
-            query_features: np.ndarray,
-            processed_df: pd.DataFrame,
-            top_k: int = 10,
-            weights: Dict[str, float] = None,
-            save_weights_flag: bool = True
-    ) -> List[Dict]:
-        """
-        Ранжирование метчей на основе признаков (тональность, стиль, тематика)
-
-        :param matches: Список словарей, где каждый словарь — это матч от FAISS
-        :param query_features: NumPy-массив размером (7,) с нормализованными признаками запроса
-        :param processed_df: Pandas DataFrame из файла processed_profiles.csv, содержащий нормализованные признаки для всех пользователей
-        :param top_k: Количество возвращаемых метчей после ранжирования
-        :param weights: Словарь с весами для признаков (sentiment, style, topic)
-        :param save_weights_flag: Флаг, отвечающий за сохранения используемых весов в файл
-        :return: Список из top_k словарей с метаданными матчей, дополненных полем relevance_score (скор релевантности)
-        """
-        # Настройка весов
-        if weights is None:
-            weights = self.load_weights()
-        if save_weights_flag:
-            self.save_weights(weights)
-
-        if not all(k in weights for k in ['sentiment', 'style', 'topic']):
-            logger.error("Веса должны содержать ключи: 'sentiment', 'style', 'topic'")
-            raise ValueError("Веса должны содержать ключи: 'sentiment', 'style', 'topic'")
-        if abs(sum(weights.values()) - 1.0) > 1e-6:
-            logger.error("Сумма весов должна быть равна 1")
-            raise ValueError("Сумма весов должна быть равна 1")
-
-        # Проверка входных данных
-        feature_columns = ['sentiment_pos', 'sentiment_neu', 'sentiment_neg',
-                           'question_length', 'question_words', 'formality_score', 'topic_norm']
-        missing_columns = [col for col in feature_columns if col not in processed_df.columns]
-        if missing_columns:
-            logger.error(f"Отсутствуют столбцы в processed_df: {missing_columns}")
-            raise ValueError(f"Отсутствуют столбцы в processed_df: {missing_columns}")
-        if query_features.shape != (len(feature_columns),):
-            logger.error(
-                f"Ожидается query_features размерности ({(len(feature_columns),)}), получено: {query_features.shape}")
-            raise ValueError(f"Ожидается query_features размерности ({(len(feature_columns),)}), получено: {query_features.shape}")
-
-        # Ранжирование метчей
-        ranked_matches = []
-        for match in matches:
-            user_id = match['user_id']
-            match_row = processed_df[processed_df['user_id'] == user_id]
-            if match_row.empty:
-                continue
-            # Извлекаются признаки матча
-            match_features = match_row[feature_columns].values[0]
-
-            # Вычисление скора релевантности
-            # Тональность первые три признака (sentiment_pos, sentiment_neu, sentiment_neg)
-            sentiment_query = query_features[:3].reshape(1, -1)
-            sentiment_match = match_features[:3].reshape(1, -1)
-            sentiment_score = cosine_similarity(sentiment_query, sentiment_match)[0][0]
-            # Стиль - следующие три признака (question_length, question_words, formality_score)
-            style_query = query_features[3:6].reshape(1, -1)
-            style_match = match_features[3:6].reshape(1, -1)
-            style_score = cosine_similarity(style_query, style_match)[0][0]
-            # Тематика - нормализованное значение темы (topic_norm)
-            topic_query = query_features[6]
-            topic_match = match_features[6]
-            topic_score = 1.0 if abs(topic_query - topic_match) < 0.1 else 0.5
-
-            # Взвешенная сумма
-            relevance_score = (
-                weights['sentiment'] * sentiment_score +
-                weights['style'] * style_score +
-                weights['topic'] * topic_score
-            )
-
-            # Формирование результата
-            ranked_matches.append({
-                'user_id': match['user_id'],
-                'sex': match['sex'],
-                'job.title': match['job.title'],
-                'organization': match['organization'],
-                'annual.salary': match['annual.salary'],
-                'age': match['age'],
-                'question': match['question'],
-                'X': match['X'],
-                'Y': match['Y'],
-                'Z': match['Z'],
-                'distance': match['distance'],
-                'relevance_score': relevance_score
-            })
-
-        # Сортировка и выбор топ-k
-        ranked_matches = sorted(ranked_matches, key=lambda x: x['relevance_score'], reverse=True)[:top_k]
-
-        # Вывод и сохранение результатов
-        logger.info(f"\nТоп-{top_k} метчей после ранжирования:")
-        for i, match in enumerate(ranked_matches, 1):
-            logger.info(f"{i}. user_id: {match['user_id']}, Пол: {match['sex']}, "
-                        f"Должность: {match['job.title']}, Организация: {match['organization']}, "
-                        f"Зарплата: {match['annual.salary']}, Возраст: {match['age']}, "
-                        f"Вопрос: {match['question']}, X: {match['X']}, Y: {match['Y']}, Z: {match['Z']}, "
-                        f"Дистанция: {match['distance']:.4f}, Релевантность: {match['relevance_score']:.4f}")
-
-        return ranked_matches
 
     def load_cache(self) -> None:
         """

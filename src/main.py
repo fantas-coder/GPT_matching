@@ -193,16 +193,17 @@ def main(
     feedback_manager = FeedbackManager(processor=processor, faiss_manager=faiss_manager)
 
     if train_flag:
+        logger.info("Запуск полного обучения и векторизации...")
         _, _ = processor.process_data(
             input_path='../data/atlanta_salary_data_2015_full.csv',
             prepared_path='../data/prepared_data.csv',
             intermediate_path='../data/intermediate_dataset.csv',
             output_path='../data/processed_profiles.csv'
         )
-
         faiss_manager.build_faiss_ivf_index()
 
     if new_record:
+        logger.info("Добавление новой записи...")
         df, _ = add_new_record(
             record=new_record,
             processor=processor,
@@ -216,6 +217,7 @@ def main(
             user_id = df['user_id'].iloc[-1]  # Берем user_id последней (новой) записи
 
     if user_id:
+        logger.info(f"Поиск для user_id {user_id}...")
         ranked_matches, indices, distances = faiss_manager.search_by_user_id(user_id=user_id, k=50)
         logger.info(f"Ранжированные результаты поиска для user_id {user_id}:")
         for i, res in enumerate(ranked_matches, 1):
@@ -223,7 +225,8 @@ def main(
                         f"Должность: {res['job.title']}, Организация: {res['organization']}, "
                         f"Зарплата: {res['annual.salary']}, Возраст: {res['age']}, "
                         f"Вопрос: {res['question']}, X: {res['X']}, Y: {res['Y']}, Z: {res['Z']}, "
-                        f"Дистанция: {res['distance']:.4f}, Релевантность: {res['relevance_score']:.4f}")
+                        f"Дистанция: {res['distance']:.4f}, Релевантность: {res['relevance_score']:.4f}, "
+                        f"Объяснение: {res['explanation']}")
 
         # Собираем обратную связь
         feedback_manager.collect_feedback(ranked_matches, user_id)
@@ -239,21 +242,21 @@ if __name__ == "__main__":
     parser.add_argument("--new-record", type=str, default=None,
                         help="New record as JSON string, e.g., '{\"age\": 22, \"sex\": \"Male\", \"job.title\": \"ml data scientist\", \"organization\": \"yandex\", \"annual.salary\": 300000, \"question\": \"Привет! Хочу найти топ 10 метчей для меня\", \"X\": 500, \"Y\": 600, \"Z\": 700}'")
     parser.add_argument("--search-new", action="store_true", help="Search for matches for a new record")
-    parser.add_argument("--user-id", type=int, default=None, help="User ID to search for top 10 matches")
+    parser.add_argument("--user-id", type=int, default=8246, help="User ID to search for top 10 matches")
     parser.add_argument("--visualize", action="store_true", help="Visualize vectors in 2D")
 
     args = parser.parse_args()
 
     # Парсим JSON для new_record
-    new_record = None
+    cur_new_record = None
     if args.new_record:
         try:
             if os.path.exists(args.new_record):
                 with open(args.new_record, 'r') as f:
-                    new_record = json.load(f)
+                    cur_new_record = json.load(f)
                 logger.info(f"Загружен JSON из файла: {args.new_record}")
             else:
-                new_record = json.loads(args.new_record)
+                cur_new_record = json.loads(args.new_record)
                 logger.info("Загружен JSON из строки")
         except (json.JSONDecodeError, OSError) as e:
             logger.error(f"Ошибка парсинга JSON для new_record: {e}")
@@ -261,7 +264,7 @@ if __name__ == "__main__":
 
     main(
         train_flag=args.train,
-        new_record=new_record,
+        new_record=cur_new_record,
         is_search_for_new_record=args.search_new,
         user_id=args.user_id,
         is_visualize=args.visualize
