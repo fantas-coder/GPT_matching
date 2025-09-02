@@ -17,3 +17,4 @@ SENTIMENT_MODEL_TASK = 'sentiment-analysis'                             # Мод
 SENTIMENT_MODEL = 'seara/rubert-tiny2-russian-sentiment'
 STYLE_MODEL = 'ru_core_news_sm'                                         # Модель для извлечения стиля
 QUESTIONS_DATA_BASE = 'kuznetsoffandrey/sberquad'                       # База данных для вопросов
+FEEDBACK_MODEL = 'paraphrase-multilingual-mpnet-base-v2'                #

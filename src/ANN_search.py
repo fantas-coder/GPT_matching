@@ -281,15 +281,6 @@ class FaissIndexManager:
                         'distance': float(dist)
                     })
 
-        # Формирование читаемого вывода
-        logger.info(f"\nТоп-{min(k, len(matches))} ближайших пользователей (до ранжирования):")
-        for i, res in enumerate(matches, 1):
-            logger.info(f"{i}. user_id: {res['user_id']}, Пол: {res['sex']}, "
-                        f"Должность: {res['job.title']}, Организация: {res['organization']}, "
-                        f"Зарплата: {res['annual.salary']}, Возраст: {res['age']}, "
-                        f"Вопрос: {res['question']}, X: {res['X']}, Y: {res['Y']}, Z: {res['Z']}, "
-                        f"Дистанция: {res['distance']:.4f}")
-
         # Ранжирование по тематике, стилю и тональности
         ranked_matches = self.rank_matches(matches, intermediate_df, processed_df, query_user_id, top_k=10)
 
@@ -421,14 +412,14 @@ class FaissIndexManager:
         # Вывод и сохранение результатов
         logger.info(f"\nТоп-{len(final_matches)} матчей после ранжирования:")
         for i, match in enumerate(final_matches, 1):
-            logger.info(f"{i}. user_id: {match['user_id']}, Пол: {match['sex']}, "
-                        f"Должность: {match['job.title']}, Организация: {match['organization']}, "
-                        f"Зарплата: {match['annual.salary']}, Возраст: {match['age']}, "
-                        f"Вопрос: {match['question']}, Ключевые слова вопроса: {match['question_keywords']}, "
-                        f"Ключевые слова темы: {match['topic_keywords']}, "
-                        f"X: {match['X']}, Y: {match['Y']}, Z: {match['Z']}, "
-                        f"Дистанция: {match['distance']:.4f}, Релевантность: {match['relevance_score']:.4f}, "
-                        f"Объяснение: {match['explanation']}")
+            logger.info(f"{i}.{'\n'}user_id: {match['user_id']}{'\n'}Пол: {match['sex']}{'\n'}"
+                        f"Должность: {match['job.title']}{'\n'}Организация: {match['organization']}{'\n'}"
+                        f"Зарплата: {match['annual.salary']}{'\n'}Возраст: {match['age']}{'\n'}"
+                        f"Вопрос: {match['question']}{'\n'}Ключевые слова вопроса: {match['question_keywords']}{'\n'}"
+                        f"Ключевые слова темы: {match['topic_keywords']}{'\n'}"
+                        f"X: {match['X']}, Y: {match['Y']}{'\n'}Z: {match['Z']}{'\n'}"
+                        f"Дистанция: {match['distance']:.4f}{'\n'}Релевантность: {match['relevance_score']:.4f}{'\n'}"
+                        f"Объяснение: {match['explanation']}{'\n'}")
 
         return final_matches
 
