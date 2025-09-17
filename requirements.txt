@@ -1,4 +1,5 @@
-﻿cachetools==6.2.0
+﻿bertopic
+cachetools==6.2.0
 datasets==4.1.0
 faiss-cpu==1.12.0
 gensim==4.3.3
