@@ -8,7 +8,7 @@ from typing import Tuple, List, Dict
 
 
 # Конфигурация
-os.makedirs('../artifacts', exist_ok=True)                         # Создание папки для весов моделей и нормализации
+os.makedirs('../artifacts', exist_ok=True)                        # Создание папки для весов моделей и нормализации
 pd.set_option('display.max_columns', None)                              # Вывод всех колонок в DataFrame
 tqdm.pandas()                                                           # Отображение обучения
 
