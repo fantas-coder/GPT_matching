@@ -2,7 +2,7 @@ from sentence_transformers import SentenceTransformer, util
 from transformers import pipeline
 import torch
 
-from config import (os, pd, logging, List, Dict,
+from config import (os, pd, logging, List, Dict, Tuple,
                     FEEDBACK_MODEL, SENTIMENT_MODEL_TASK, SENTIMENT_MODEL)
 
 
@@ -86,7 +86,44 @@ class FeedbackManager:
         self.process_feedback(user_id_query, ranked_matches, rating)
         logger.info(f"Оценка {rating} применена ко всем матчам")
 
-    def _parse_rating(self, user_input: str) -> tuple[int | None, float | None]:
+    def collect_feedback_api(
+            self,
+            user_id: int,
+            match_id: int,
+            feedback: str,
+            lang: str = "ru"
+    ) -> Tuple[int | None, float | None, str]:
+        rating, score_100 = self._parse_rating(feedback)
+        if rating is None:
+            logger.warning(f"Не удалось распознать фидбек: {feedback}")
+            return None, None, "Не удалось распознать оценку. Попробуйте снова (например, '4' или 'хорошо')."
+
+        ranked_matches = [{
+            'user_id': match_id,
+            'sex': None,
+            'job.title': None,
+            'organization': None,
+            'annual.salary': None,
+            'age': None,
+            'question': feedback,
+            'question_keywords': None,
+            'topic_keywords': None,
+            'X': 0,
+            'Y': 0,
+            'Z': 0,
+            'distance': 0.0,
+            'relevance_score': score_100 or 0.0,
+            'explanation': f"Feedback: {feedback}"
+        }]
+
+        self.process_feedback(user_id, ranked_matches, rating)
+        logger.info(f"Фидбек обработан: rating={rating}, score_100={score_100:.1f}, match_id={match_id}")
+        return rating, score_100, f"Оценка {rating} успешно применена"
+
+    def _parse_rating(
+            self,
+            user_input: str
+    ) -> tuple[int | None, float | None]:
         """Парсит ввод: число → напрямую, текст → эмбеддинги + sentiment."""
         # Пустая строка
         if not user_input:
