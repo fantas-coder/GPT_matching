@@ -187,6 +187,7 @@ class FaissIndexManager:
             query_vector: np.ndarray,
             query_user_id: int = None,
             k: int = 50,
+            top_k: int = 10,
             nprobe: int = None,
             save_nprobe_flag: bool = True
     ) -> Tuple[List[Dict], List[int], List[float]]:
@@ -196,6 +197,7 @@ class FaissIndexManager:
         :param query_vector: Вектор объекта, для которого выполняется поиск
         :param query_user_id: id запрашиваемого пользователя
         :param k: Количество метчей
+        :param top_k: Количество метчей после ранжирования
         :param nprobe: Количество кластеров для приближённого (ANN) поиска
         :param save_nprobe_flag: Флаг, отвечающий за сохранения nprobe при загрузке
         :return: Возвращает кортеж: список индексов метчей и список расстояния до соответсвующих метчей
@@ -284,7 +286,7 @@ class FaissIndexManager:
                     })
 
         # Ранжирование по тематике, стилю и тональности
-        ranked_matches = self.rank_matches(matches, intermediate_df, processed_df, query_user_id, top_k=10)
+        ranked_matches = self.rank_matches(matches, intermediate_df, processed_df, query_user_id, top_k=top_k)
 
         with open(f'../results/search_results_user_{query_user_id}.json', 'w', encoding='utf-8') as f:
             json.dump(ranked_matches, f, ensure_ascii=False, indent=4)
@@ -429,6 +431,7 @@ class FaissIndexManager:
             self,
             user_id: int,
             k: int = 50,
+            top_k: int = 10,
             nprobe: int = None,
             save_nprobe_flag: bool = True
     ) -> Tuple[List[Dict], List[int], List[float]]:
@@ -437,6 +440,7 @@ class FaissIndexManager:
 
         :param user_id: id пользователя, для которого выполняется поиск
         :param k: Количество соседних до ранжирования
+        :param top_k: Количество соседних после ранжирования
         :param nprobe: Количество кластеров для приближённого (ANN) поиска
         :param save_nprobe_flag: Флаг, отвечающий за сохранения nprobe при загрузке
         :return: Возвращает кортеж: список индексов метчей и список расстояния до соответсвующих метчей
@@ -490,6 +494,7 @@ class FaissIndexManager:
             query_vector=query_vector,
             query_user_id=user_id,
             k=k,
+            top_k=top_k,
             nprobe=nprobe
         )
 
