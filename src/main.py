@@ -288,7 +288,7 @@ if __name__ == "__main__":
             raise ValueError("new_record должен быть валидной JSON-строкой или путём к JSON-файлу")
 
     main(
-        train_flag=True,
+        train_flag=args.train,
         new_record=cur_new_record,
         is_search_for_new_record=args.search_new,
         user_id=args.user_id,
