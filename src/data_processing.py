@@ -92,7 +92,7 @@ class DataProcessor:
                     self.scalers[name] = pickle.load(open(scaler_path, 'rb'))
                     logger.info(f"Загружен нормализатор: {scaler_path}")
             if os.path.exists('../artifacts/topic_model'):
-                self.topic_model = BERTopic.load('../artifacts/topic_model')
+                self.topic_model = BERTopic.load('../artifacts/topic_model', embedding_model=self.gpt_model)
                 logger.info("Загружена модель BERTopic: ../artifacts/topic_model")
         except Exception as e:
             logger.error(f"Ошибка загрузки артефактов: {e}")
@@ -239,16 +239,19 @@ class DataProcessor:
 
         # Извлечение тематики
         logger.info("Извлечение тематики на GPU..." if self.device.type == 'cuda' else "Извлечение тематики на CPU...")
-        valid_questions = [q if q else "Пустой вопрос" for q in questions]
+        valid_questions = [q if q and q.strip() else "Пустой вопрос" for q in questions]
         if train_mode:
             try:
-                topics, _ = self.topic_model.fit_transform(valid_questions)
                 os.makedirs('../artifacts', exist_ok=True)
-                self.topic_model.save('../artifacts/topic_model', serialization='safetensors')
-                logger.info("Модель BERTopic сохранена: ../artifacts/topic_model")
+                model_path = '../artifacts/topic_model'
+                topics, _ = self.topic_model.fit_transform(valid_questions)
+                self.topic_model.save(model_path, serialization='safetensors')
+                logger.info(f"Модель BERTopic обучена и сохранена: {model_path}")
             except Exception as e:
-                logger.error(f"Ошибка сохранения модели BERTopic: {e}")
-                topics = [0] * len(valid_questions)  # Фallback: нулевые темы
+                logger.error(f"Ошибка обучения или сохранения модели BERTopic: {e}")
+                # Добавь отладку
+                logger.error(f"Состояние модели: {self.topic_model}")
+                topics = [0] * len(valid_questions)  # Fallback
         else:
             try:
                 topics = self.topic_model.transform(valid_questions)[0]

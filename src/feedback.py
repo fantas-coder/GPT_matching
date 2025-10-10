@@ -23,9 +23,8 @@ class FeedbackManager:
         self.very_bad_matches = []
         self.output_dir = '../data/saved_matches'
         os.makedirs(self.output_dir, exist_ok=True)
-
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.embedding_model = SentenceTransformer(FEEDBACK_MODEL)
+        self.embedding_model = SentenceTransformer(FEEDBACK_MODEL, device=self.device)
         self.sentiment_model = pipeline(  # Модель для извлечения тональности
             task=SENTIMENT_MODEL_TASK,
             model=SENTIMENT_MODEL,

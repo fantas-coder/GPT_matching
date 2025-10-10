@@ -1,5 +1,6 @@
 import argparse
 import json
+import shutil
 
 import torch
 import faiss
@@ -206,12 +207,16 @@ def main(
     """
     logger.info(
         f"GPU available: {torch.cuda.is_available()}, Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
-
     processor = DataProcessor()
     faiss_manager = FaissIndexManager()
     feedback_manager = FeedbackManager(processor=processor, faiss_manager=faiss_manager)
 
     if train_flag:
+        # Удаление старых файлов перед обучением
+        artifacts_path = '../artifacts'
+        if os.path.exists(artifacts_path):
+            shutil.rmtree(artifacts_path)
+            logger.info(f"Старая папка {artifacts_path} удалёна перед переобучением")
         logger.info("Запуск полного обучения и векторизации...")
         _, _ = processor.process_data(
             input_path='../data/atlanta_salary_data_2015_full.csv',
@@ -282,13 +287,6 @@ if __name__ == "__main__":
             logger.error(f"Ошибка парсинга JSON для new_record: {e}")
             raise ValueError("new_record должен быть валидной JSON-строкой или путём к JSON-файлу")
 
-    # main(
-    #     train_flag=args.train,
-    #     new_record=cur_new_record,
-    #     is_search_for_new_record=args.search_new,
-    #     user_id=args.user_id,
-    #     is_visualize=args.visualize
-    # )
     main(
         train_flag=True,
         new_record=cur_new_record,
@@ -296,3 +294,10 @@ if __name__ == "__main__":
         user_id=args.user_id,
         is_visualize=args.visualize
     )
+    # main(
+    #     train_flag=False,
+    #     new_record=cur_new_record,
+    #     is_search_for_new_record=args.search_new,
+    #     user_id=args.user_id,
+    #     is_visualize=args.visualize
+    # )

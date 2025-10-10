@@ -34,10 +34,10 @@ class FaissIndexManager:
         self.weights_path = weights_path
         self.cache = LRUCache(maxsize=1000)                # Кеш в памяти
         self.cache_file = '../artifacts/search_cache.pkl'  # Файл для сохранения кеша
-        # self.gpu_available = torch.cuda.is_available()
-        # self.gpu_id = 0 if self.gpu_available else -1
-        self.gpu_available = False
-        self.gpu_id = 0
+        self.gpu_available = torch.cuda.is_available()
+        self.gpu_id = 0 if self.gpu_available else -1
+        # self.gpu_available = False
+        # self.gpu_id = 0
         logger.info(
             f"GPU available for FAISS: {self.gpu_available}, Device: {torch.cuda.get_device_name(0) if self.gpu_available else 'CPU'}")
 
