@@ -25,19 +25,21 @@ class FaissIndexManager:
                  intermediate_csv: str = '../data/intermediate_dataset.csv',
                  processed_csv: str = '../data/processed_profiles.csv',
                  nprobe_path: str = '../artifacts/nprobe.json',
-                 weights_path: str = '../artifacts/weights.json'):
+                 weights_path: str = '../artifacts/weights.json',
+                 no_matches_file: str = '../artifacts/no_matches_users.json'):
         self.vectors_path = vectors_path
         self.index_path = index_path
         self.intermediate_csv = intermediate_csv
         self.processed_csv = processed_csv
+        self.no_matches_file = no_matches_file
         self.nprobe_path = nprobe_path
         self.weights_path = weights_path
         self.cache = LRUCache(maxsize=1000)                # Кеш в памяти
         self.cache_file = '../artifacts/search_cache.pkl'  # Файл для сохранения кеша
-        self.gpu_available = torch.cuda.is_available()
-        self.gpu_id = 0 if self.gpu_available else -1
-        # self.gpu_available = False
-        # self.gpu_id = 0
+        # self.gpu_available = torch.cuda.is_available()
+        # self.gpu_id = 0 if self.gpu_available else -1
+        self.gpu_available = False
+        self.gpu_id = 0
         logger.info(
             f"GPU available for FAISS: {self.gpu_available}, Device: {torch.cuda.get_device_name(0) if self.gpu_available else 'CPU'}")
 
@@ -45,9 +47,19 @@ class FaissIndexManager:
         os.makedirs(os.path.dirname(self.processed_csv), exist_ok=True)
         os.makedirs('../results', exist_ok=True)
         os.makedirs(os.path.dirname(self.nprobe_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.no_matches_file), exist_ok=True)
 
         self.load_cache()
         self.load_nprobe()
+
+        # Создаем файл no_matches_file, если он не существует
+        if not os.path.exists(self.no_matches_file):
+            try:
+                with open(self.no_matches_file, 'w', encoding='utf-8') as f:
+                    json.dump([], f, ensure_ascii=False)
+                logger.info(f"Создан пустой файл {self.no_matches_file}")
+            except Exception as e:
+                logger.error(f"Ошибка при создании файла {self.no_matches_file}: {e}")
 
     def build_faiss_ivf_index(
             self,
@@ -189,18 +201,22 @@ class FaissIndexManager:
             k: int = 50,
             top_k: int = 10,
             nprobe: int = None,
-            save_nprobe_flag: bool = True
+            save_nprobe_flag: bool = True,
+            relevance_threshold: float = 0.7,
+            distance_threshold: float = 1000.0
     ) -> Tuple[List[Dict], List[int], List[float]]:
         """
-        Функция ищет топ-K метчей в FAISS IndexIVFFlat
+        Функция ищет топ-K матчей в FAISS IndexIVFFlat
 
         :param query_vector: Вектор объекта, для которого выполняется поиск
         :param query_user_id: id запрашиваемого пользователя
-        :param k: Количество метчей
-        :param top_k: Количество метчей после ранжирования
+        :param k: Количество метчей до фильтрации
+        :param top_k: Количество матчей после ранжирования
         :param nprobe: Количество кластеров для приближённого (ANN) поиска
         :param save_nprobe_flag: Флаг, отвечающий за сохранения nprobe при загрузке
-        :return: Возвращает кортеж: список индексов метчей и список расстояния до соответсвующих метчей
+        :param relevance_threshold: Порог релевантности для включения матча
+        :param distance_threshold: Порог L2-расстояния для включения матча
+        :return: Возвращает кортеж: список словарей с матчами, список индексов, список расстояний
         """
         if not os.path.exists(self.index_path):
             logger.error(f"Индекс {self.index_path} не найден")
@@ -230,7 +246,7 @@ class FaissIndexManager:
             logger.error(f"Ожидается один вектор запроса, получено: {query_vector.shape[0]}")
             raise ValueError(f"Ожидается один вектор запроса, получено: {query_vector.shape[0]}")
 
-        # Установка количества кластеров для поиска (баланс скорости/точности)
+        # Установка количества кластеров для поиска
         if not nprobe:
             nprobe = self.load_nprobe()
         if save_nprobe_flag:
@@ -240,12 +256,25 @@ class FaissIndexManager:
         # Поиск
         distances, indices = index.search(query_vector, k)
 
+        # Фильтрация по distance_threshold
+        filtered_indices = []
+        filtered_distances = []
+        for idx, dist in zip(indices[0], distances[0]):
+            if dist <= distance_threshold:
+                filtered_indices.append(idx)
+                filtered_distances.append(dist)
+            else:
+                logger.debug(f"Матч с индексом {idx} исключён, расстояние {dist:.4f} > {distance_threshold}")
+
+        if not filtered_indices:
+            logger.info(f"Нет матчей с расстоянием <= {distance_threshold} для user_id {query_user_id}")
+
         # Загрузка баз данных
         intermediate_df = pd.read_csv(self.intermediate_csv)
         processed_df = pd.read_csv(self.processed_csv)
 
         matches = []
-        for idx, dist in zip(indices[0], distances[0]):
+        for idx, dist in zip(filtered_indices, filtered_distances):
             if idx < len(processed_df):
                 proc_user_id = processed_df.iloc[idx]['user_id']
                 if query_user_id is not None and proc_user_id == query_user_id:
@@ -286,13 +315,56 @@ class FaissIndexManager:
                     })
 
         # Ранжирование по тематике, стилю и тональности
-        ranked_matches = self.rank_matches(matches, intermediate_df, processed_df, query_user_id, top_k=top_k)
+        ranked_matches = self.rank_matches(
+            matches,
+            intermediate_df,
+            processed_df,
+            query_user_id,
+            top_k=top_k,
+            relevance_threshold=relevance_threshold
+        )
 
+        # Если после ранжирования нет матчей, добавляем query_user_id в no_matches_file
+        if not ranked_matches and query_user_id is not None:
+            logger.warning(f"Для user_id {query_user_id} не найдено матчей после ранжирования "
+                           f"(distance_threshold={distance_threshold}, relevance_threshold={relevance_threshold})")
+            try:
+                # Загружаем существующий список user_id без матчей
+                no_matches_users = []
+                if os.path.exists(self.no_matches_file):
+                    try:
+                        with open(self.no_matches_file, 'r', encoding='utf-8') as f:
+                            no_matches_users = json.load(f)
+                    except json.JSONDecodeError as e:
+                        logger.error(
+                            f"Ошибка декодирования JSON в {self.no_matches_file}: {e}. Создаём новый пустой файл.")
+                        no_matches_users = []
+
+                # Добавляем user_id, если его ещё нет
+                if query_user_id not in no_matches_users:
+                    no_matches_users.append(query_user_id)
+
+                    # Сохраняем обновлённый список во временный файл
+                    temp_file = self.no_matches_file + ".tmp"
+                    os.makedirs(os.path.dirname(self.no_matches_file), exist_ok=True)
+                    with open(temp_file, 'w', encoding='utf-8') as f:
+                        json.dump(no_matches_users, f, ensure_ascii=False, indent=4)
+
+                    # Атомарно заменяем основной файл
+                    os.replace(temp_file, self.no_matches_file)
+                    logger.info(f"user_id {query_user_id} добавлен в {self.no_matches_file}")
+                else:
+                    logger.info(f"user_id {query_user_id} уже присутствует в {self.no_matches_file}")
+            except Exception as e:
+                logger.error(f"Ошибка при записи в {self.no_matches_file}: {e}")
+
+        # Сохранение результатов поиска
         with open(f'../results/search_results_user_{query_user_id}.json', 'w', encoding='utf-8') as f:
             json.dump(ranked_matches, f, ensure_ascii=False, indent=4)
-        logger.info(f"Результаты поиска для user_id {query_user_id} сохранены в ../results/search_results_user_{query_user_id}.json")
+        logger.info(
+            f"Результаты поиска для user_id {query_user_id} сохранены в ../results/search_results_user_{query_user_id}.json")
 
-        return ranked_matches, indices[0].tolist(), distances[0].tolist()
+        return ranked_matches, filtered_indices, filtered_distances
 
     def rank_matches(
             self,
@@ -302,7 +374,8 @@ class FaissIndexManager:
             query_user_id: int,
             top_k: int = 10,
             weights: Dict[str, float] = None,
-            save_weights_flag: bool = True
+            save_weights_flag: bool = True,
+            relevance_threshold: float = 0.7
     ) -> List[Dict]:
         """
         Ранжирование метчей на основе признаков (тональность, стиль, тематика)
@@ -314,6 +387,7 @@ class FaissIndexManager:
         :param top_k: Количество возвращаемых метчей после ранжирования
         :param weights: Словарь с весами для признаков (sentiment, style, topic)
         :param save_weights_flag: Флаг, отвечающий за сохранения используемых весов в файл
+        :param relevance_threshold: Порог релевантности для включения матча
         :return: Список из top_k словарей с метаданными матчей, дополненных полем relevance_score и explanation
         """
         # Настройка весов
@@ -379,6 +453,12 @@ class FaissIndexManager:
                     weights['topic'] * topic_score
             )
 
+            # Фильтрация по порогу релевантности
+            if relevance_score < relevance_threshold:
+                logger.debug(
+                    f"Матч с user_id {user_id} исключен, relevance_score={relevance_score:.4f} < {relevance_threshold}")
+                continue
+
             # Формирование результата без объяснения
             ranked_matches.append({
                 'user_id': match['user_id'],
@@ -431,9 +511,11 @@ class FaissIndexManager:
             self,
             user_id: int,
             k: int = 50,
-            top_k: int = 10,
+            top_k: int = 1,
             nprobe: int = None,
-            save_nprobe_flag: bool = True
+            save_nprobe_flag: bool = True,
+            relevance_threshold: float = 0.7,
+            distance_threshold: float = 100.0
     ) -> Tuple[List[Dict], List[int], List[float]]:
         """
         Функция ищет топ-K метчей в FAISS IndexIVFFlat по user_id
@@ -443,6 +525,8 @@ class FaissIndexManager:
         :param top_k: Количество соседних после ранжирования
         :param nprobe: Количество кластеров для приближённого (ANN) поиска
         :param save_nprobe_flag: Флаг, отвечающий за сохранения nprobe при загрузке
+        :param relevance_threshold: Порог релевантности для включения матча
+        :param distance_threshold: Порог L2-расстояния для включения матча
         :return: Возвращает кортеж: список индексов метчей и список расстояния до соответсвующих метчей
         """
         if not nprobe:
@@ -495,7 +579,9 @@ class FaissIndexManager:
             query_user_id=user_id,
             k=k,
             top_k=top_k,
-            nprobe=nprobe
+            nprobe=nprobe,
+            relevance_threshold=relevance_threshold,
+            distance_threshold=distance_threshold
         )
 
         # Сохранение результатов в кеш

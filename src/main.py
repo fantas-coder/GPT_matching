@@ -26,7 +26,8 @@ def add_new_record(
         vectors_csv: str = '../data/processed_profiles.csv',
         vectors_path: str = '../artifacts/user_vectors.npy',
         index_path: str = '../artifacts/faiss_index_ivf.index',
-        nlist: int = 100
+        nlist: int = 100,
+        no_matches_file: str = '../artifacts/no_matches_users.json'
 ) -> Tuple[pd.DataFrame, np.ndarray]:
     """
     Функция добавление новую записи в базу данных
@@ -39,6 +40,7 @@ def add_new_record(
     :param vectors_path: Путь до текущих финальных векторов
     :param index_path: Путь до обученного индекса FAISS
     :param nlist: Количество кластеров для обучения FAISS
+    :param no_matches_file: Путь до файла с user_id без матчей
     :return: Кортеж новой векторизованной БД и новых финальных векторов
     """
     required_keys = ['age', 'sex', 'job.title', 'organization', 'annual.salary', 'question']
@@ -186,6 +188,51 @@ def add_new_record(
     logger.info(f"Обновленная БД:\n{updated_df.tail(1)}")
     logger.info(f"Обновленные векторы размерностью: {updated_vectors.shape}")
 
+    # Проверка пользователей без матчей
+    if os.path.exists(no_matches_file):
+        try:
+            with open(no_matches_file, 'r', encoding='utf-8') as f:
+                no_matches_users = json.load(f)
+        except Exception as e:
+            logger.error(f"Ошибка чтения {no_matches_file}: {e}")
+            no_matches_users = []
+    else:
+        no_matches_users = []
+
+    if not no_matches_users:
+        logger.info("Файл no_matches_users пустой — пропускаем проверку")
+        return updated_df, updated_vectors
+
+    logger.info(f"Проверка {len(no_matches_users)} пользователей из {no_matches_file} на новые матчи...")
+
+    still_no_matches = []
+    removed_count = 0
+
+    for user_id in no_matches_users:
+        try:
+            ranked_matches, _, _ = faiss_manager.search_by_user_id(
+                user_id=user_id,
+                relevance_threshold=0.7,
+                distance_threshold=100.0
+            )
+            if ranked_matches:  # Если есть хотя бы один матч
+                logger.info(f"Для user_id={user_id} найдено {len(ranked_matches)} матчей — удаляем из no_matches")
+                removed_count += 1
+            else:
+                still_no_matches.append(user_id)
+        except Exception as e:
+            logger.warning(f"Ошибка при поиске для user_id={user_id}: {e}")
+            still_no_matches.append(user_id)
+
+    # Сохраняем обновлённый список
+    try:
+        os.makedirs(os.path.dirname(no_matches_file), exist_ok=True)
+        with open(no_matches_file, 'w', encoding='utf-8') as f:
+            json.dump(still_no_matches, f, ensure_ascii=False, indent=4)
+        logger.info(f"Обновлён {no_matches_file}: удалено {removed_count}, осталось {len(still_no_matches)}")
+    except Exception as e:
+        logger.error(f"Ошибка сохранения {no_matches_file}: {e}")
+
     return updated_df, updated_vectors
 
 
@@ -231,7 +278,8 @@ def main(
         df, _ = add_new_record(
             record=new_record,
             processor=processor,
-            faiss_manager=faiss_manager
+            faiss_manager=faiss_manager,
+            no_matches_file='../artifacts/no_matches_users.json'
         )
 
         if is_search_for_new_record:
@@ -242,7 +290,12 @@ def main(
 
     if user_id:
         logger.info(f"Поиск для user_id {user_id}...")
-        ranked_matches, indices, distances = faiss_manager.search_by_user_id(user_id=user_id, k=50)
+        ranked_matches, indices, distances = faiss_manager.search_by_user_id(
+            user_id=user_id,
+            k=50,
+            relevance_threshold=0.7,
+            distance_threshold=100.0
+        )
         logger.info(f"Ранжированные результаты поиска для user_id {user_id}:")
         for i, res in enumerate(ranked_matches, 1):
             logger.info(f"{i}. user_id: {res['user_id']}, Пол: {res['sex']}, "
@@ -263,7 +316,7 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GPT Matching System")
     parser.add_argument("--train", action="store_true", help="Run training and vectorization of the database")
-    parser.add_argument("--new-record", type=str, default=None,
+    parser.add_argument("--new-record", type=str, default="../data/new_record.json",
                         help="New record as JSON string, e.g., '{\"age\": 22, \"sex\": \"Male\", \"job.title\": \"ml data scientist\", \"organization\": \"yandex\", \"annual.salary\": 300000, \"question\": \"Привет! Хочу найти топ 10 метчей для меня\", \"X\": 500, \"Y\": 600, \"Z\": 700}'")
     parser.add_argument("--search-new", action="store_true", help="Search for matches for a new record")
     parser.add_argument("--user-id", type=int, default=None, help="User ID to search for top 10 matches")
@@ -287,17 +340,18 @@ if __name__ == "__main__":
             logger.error(f"Ошибка парсинга JSON для new_record: {e}")
             raise ValueError("new_record должен быть валидной JSON-строкой или путём к JSON-файлу")
 
-    main(
-        train_flag=args.train,
-        new_record=cur_new_record,
-        is_search_for_new_record=args.search_new,
-        user_id=args.user_id,
-        is_visualize=args.visualize
-    )
     # main(
-    #     train_flag=False,
+    #     train_flag=args.train,
     #     new_record=cur_new_record,
     #     is_search_for_new_record=args.search_new,
     #     user_id=args.user_id,
     #     is_visualize=args.visualize
     # )
+    main(
+        train_flag=False,
+        new_record=cur_new_record,
+        is_search_for_new_record=False,
+        user_id=args.user_id,
+        is_visualize=False
+    )
+# default="../data/new_record.json"
