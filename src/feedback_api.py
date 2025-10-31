@@ -60,6 +60,7 @@ feedback_manager = FeedbackManager(processor=processor, faiss_manager=faiss_mana
 def get_feedback_manager():
     return feedback_manager
 
+
 def get_faiss_manager():
     return faiss_manager
 
@@ -114,14 +115,6 @@ async def get_best_match(request: BestMatchRequest, faiss_manager: FaissIndexMan
 
         # Берём первый (лучший) матч
         best_match = ranked_matches[0]
-        logger.info(f"Лучший матч для user_id {request.user_id}: "
-                    f"user_id: {best_match['user_id']}, Пол: {best_match['sex']}, "
-                    f"Должность: {best_match['job.title']}, Организация: {best_match['organization']}, "
-                    f"Зарплата: {best_match['annual.salary']}, Возраст: {best_match['age']}, "
-                    f"Вопрос: {best_match['question']}, X: {best_match['X']}, Y: {best_match['Y']}, "
-                    f"Z: {best_match['Z']}, Дистанция: {best_match['distance']:.4f}, "
-                    f"Релевантность: {best_match['relevance_score']:.4f}, "
-                    f"Объяснение: {best_match['explanation']}")
 
         return JSONResponse(
             content=BestMatchResponse(
