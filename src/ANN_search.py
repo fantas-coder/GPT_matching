@@ -36,10 +36,10 @@ class FaissIndexManager:
         self.weights_path = weights_path
         self.cache = LRUCache(maxsize=1000)                # Кеш в памяти
         self.cache_file = '../artifacts/search_cache.pkl'  # Файл для сохранения кеша
-        self.gpu_available = torch.cuda.is_available()
-        self.gpu_id = 0 if self.gpu_available else -1
-        # self.gpu_available = False
-        # self.gpu_id = 0
+        # self.gpu_available = torch.cuda.is_available()
+        # self.gpu_id = 0 if self.gpu_available else -1
+        self.gpu_available = False
+        self.gpu_id = 0
         logger.info(
             f"GPU available for FAISS: {self.gpu_available}, Device: {torch.cuda.get_device_name(0) if self.gpu_available else 'CPU'}")
 
@@ -459,6 +459,15 @@ class FaissIndexManager:
                     f"Матч с user_id {user_id} исключен, relevance_score={relevance_score:.4f} < {relevance_threshold}")
                 continue
 
+            # Получаем match_data из intermediate_df
+            match_intermediate = intermediate_df[intermediate_df['user_id'] == user_id]
+            if match_intermediate.empty:
+                continue
+            match_intermediate = match_intermediate.iloc[0]
+
+            # Определяем категории
+            categories = self.determine_categories(query_data, match_intermediate)
+
             # Формирование результата без объяснения
             ranked_matches.append({
                 'user_id': match['user_id'],
@@ -475,7 +484,8 @@ class FaissIndexManager:
                 'Z': int(match['Z']),
                 'distance': float(match['distance']),
                 'relevance_score': float(relevance_score),
-                '_match_processed': match_processed  # Временное хранение для генерации объяснений
+                'categories': categories,
+                '_match_processed': match_processed
             })
 
         # Сортировка и выбор топ-k
@@ -503,7 +513,7 @@ class FaissIndexManager:
                         f"Ключевые слова темы: {match['topic_keywords']}{'\n'}"
                         f"X: {match['X']}, Y: {match['Y']}{'\n'}Z: {match['Z']}{'\n'}"
                         f"Дистанция: {match['distance']:.4f}{'\n'}Релевантность: {match['relevance_score']:.4f}{'\n'}"
-                        f"Объяснение: {match['explanation']}{'\n'}")
+                        f"Объяснение: {match['explanation']}{'\n'}Категории: {match['categories']}{'\n'}")
 
         return final_matches
 
@@ -590,6 +600,86 @@ class FaissIndexManager:
         logger.info(f"Результаты для user_id={user_id}, k={k}, nprobe={nprobe} добавлены в кеш")
 
         return ranked_matches, indices, distances
+
+    def determine_categories(self, query_data: pd.Series, match_data: pd.Series) -> List[str]:
+        """
+        Определяет категории матча на основе сравнения query_data и match_data.
+
+        :param query_data: Данные текущего пользователя из intermediate_df
+        :param match_data: Данные матча из intermediate_df
+        :return: Список категорий (может быть несколько)
+        """
+        categories = []
+
+        # Извлечение и нормализация данных
+        def extract_text(row):
+            return ' '.join([
+                str(row.get('question', '')).lower(),
+                str(row.get('question_keywords', '')).lower(),
+                str(row.get('topic_keywords', '')).lower(),
+                str(row.get('job.title', '')).lower(),
+                str(row.get('organization', '')).lower()
+            ])
+
+        q_text = extract_text(query_data)
+        m_text = extract_text(match_data)
+
+        q_age = int(query_data['age'])
+        m_age = int(match_data['age'])
+        age_diff = abs(q_age - m_age)
+
+        q_sex = str(query_data['sex'])
+        m_sex = str(match_data['sex'])
+
+        q_salary = float(query_data['annual.salary'])
+        m_salary = float(match_data['annual.salary'])
+
+        # 1. Поиск друзей
+        if q_sex == m_sex and age_diff <= 5:
+            if not any(word in q_text + m_text for word in
+                       ['бизнес', 'клиент', 'работа', 'запуск', 'стартап', 'ищу работу']):
+                categories.append("Поиск друзей")
+
+        # 2. Поиск клиентов для бизнеса
+        business_owner_keywords = ['директор', 'владелец', 'ceo', 'основатель', 'предприниматель']
+        business_keywords = ['бизнес', 'клиент', 'продаж', 'услуг', 'заказ', 'продавать']
+
+        is_q_business_owner = any(kw in q_text for kw in business_owner_keywords)
+        is_m_business_owner = any(kw in m_text for kw in business_owner_keywords)
+        has_business_intent = any(kw in q_text + m_text for kw in business_keywords)
+
+        if (is_q_business_owner and m_salary > 100000) or (is_m_business_owner and q_salary > 100000) or \
+                (has_business_intent and (is_q_business_owner or is_m_business_owner)):
+            categories.append("Поиск клиентов для бизнеса")
+
+        # 3. Поиск запуска
+        startup_keywords = ['стартап', 'запуск', 'mvp', 'инвестиц', 'питч', 'launch', 'startup', 'product', 'idea']
+        if any(kw in q_text for kw in startup_keywords) and any(kw in m_text for kw in startup_keywords):
+            categories.append("Поиск запуска")
+
+        # 4. Поиск романтических знакомств
+        if q_sex != m_sex and age_diff <= 7:
+            blocked_by_business = any(word in q_text + m_text for word in ['бизнес', 'работа', 'клиент', 'вакансия'])
+            if not blocked_by_business:
+                categories.append("Поиск романтических знакомств")
+
+        # 5. Поиск работы/стажировки
+        job_seeker_keywords = ['ищу работу', 'стажировка', 'вакансия', 'трудоустроиться', 'резюме', 'junior']
+        employer_keywords = ['нанять', 'ищем', 'приглашаем', 'hr', 'вакансия', 'рекрутер']
+
+        is_q_seeker = q_salary < 60000 or any(kw in q_text for kw in job_seeker_keywords)
+        is_m_seeker = m_salary < 60000 or any(kw in m_text for kw in job_seeker_keywords)
+        is_q_employer = any(kw in q_text for kw in employer_keywords)
+        is_m_employer = any(kw in m_text for kw in employer_keywords)
+
+        if (is_q_seeker and is_m_employer) or (is_m_seeker and is_q_employer):
+            categories.append("Поиск работы/стажировки")
+
+        # 6. Другой поиск (fallback)
+        if not categories:
+            categories.append("Другой поиск")
+
+        return categories
 
     def load_cache(self) -> None:
         """

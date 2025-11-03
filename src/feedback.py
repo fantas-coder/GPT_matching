@@ -71,7 +71,7 @@ class FeedbackManager:
                         f"Ключевые слова темы: {match['topic_keywords']}{'\n'}"
                         f"X: {match['X']}, Y: {match['Y']}{'\n'}Z: {match['Z']}{'\n'}"
                         f"Дистанция: {match['distance']:.4f}{'\n'}Релевантность: {match['relevance_score']:.4f}{'\n'}"
-                        f"Объяснение: {match['explanation']}{'\n'}")
+                        f"Объяснение: {match['explanation']}{'\n'}Категории: {match['categories']}{'\n'}")
 
         while True:
             user_input = input(
