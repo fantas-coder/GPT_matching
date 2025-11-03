@@ -298,12 +298,14 @@ def main(
         )
         logger.info(f"Ранжированные результаты поиска для user_id {user_id}:")
         for i, res in enumerate(ranked_matches, 1):
-            logger.info(f"{i}. user_id: {res['user_id']}, Пол: {res['sex']}, "
-                        f"Должность: {res['job.title']}, Организация: {res['organization']}, "
-                        f"Зарплата: {res['annual.salary']}, Возраст: {res['age']}, "
-                        f"Вопрос: {res['question']}, X: {res['X']}, Y: {res['Y']}, Z: {res['Z']}, "
-                        f"Дистанция: {res['distance']:.4f}, Релевантность: {res['relevance_score']:.4f}, "
-                        f"Объяснение: {res['explanation']}")
+            logger.info(f"{i}.{'\n'}user_id: {res['user_id']}{'\n'}Пол: {res['sex']}{'\n'}"
+                        f"Должность: {res['job.title']}{'\n'}Организация: {res['organization']}{'\n'}"
+                        f"Зарплата: {res['annual.salary']}{'\n'}Возраст: {res['age']}{'\n'}"
+                        f"Вопрос: {res['question']}{'\n'}Ключевые слова вопроса: {res['question_keywords']}{'\n'}"
+                        f"Ключевые слова темы: {res['topic_keywords']}{'\n'}"
+                        f"X: {res['X']}, Y: {res['Y']}{'\n'}Z: {res['Z']}{'\n'}"
+                        f"Дистанция: {res['distance']:.4f}{'\n'}Релевантность: {res['relevance_score']:.4f}{'\n'}"
+                        f"Объяснение: {res['explanation']}{'\n'}Категории: {res['categories']}{'\n'}")
 
         # Собираем обратную связь
         feedback_manager.collect_feedback(ranked_matches, user_id)
@@ -340,18 +342,18 @@ if __name__ == "__main__":
             logger.error(f"Ошибка парсинга JSON для new_record: {e}")
             raise ValueError("new_record должен быть валидной JSON-строкой или путём к JSON-файлу")
 
-    main(
-        train_flag=args.train,
-        new_record=cur_new_record,
-        is_search_for_new_record=args.search_new,
-        user_id=args.user_id,
-        is_visualize=args.visualize
-    )
     # main(
-    #     train_flag=False,
+    #     train_flag=args.train,
     #     new_record=cur_new_record,
-    #     is_search_for_new_record=False,
+    #     is_search_for_new_record=args.search_new,
     #     user_id=args.user_id,
-    #     is_visualize=False
+    #     is_visualize=args.visualize
     # )
+    main(
+        train_flag=False,
+        new_record=cur_new_record,
+        is_search_for_new_record=False,
+        user_id=3,
+        is_visualize=False
+    )
 # default="../data/new_record.json"
