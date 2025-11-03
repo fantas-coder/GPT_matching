@@ -342,18 +342,18 @@ if __name__ == "__main__":
             logger.error(f"Ошибка парсинга JSON для new_record: {e}")
             raise ValueError("new_record должен быть валидной JSON-строкой или путём к JSON-файлу")
 
-    # main(
-    #     train_flag=args.train,
-    #     new_record=cur_new_record,
-    #     is_search_for_new_record=args.search_new,
-    #     user_id=args.user_id,
-    #     is_visualize=args.visualize
-    # )
     main(
-        train_flag=False,
+        train_flag=args.train,
         new_record=cur_new_record,
-        is_search_for_new_record=False,
-        user_id=3,
-        is_visualize=False
+        is_search_for_new_record=args.search_new,
+        user_id=args.user_id,
+        is_visualize=args.visualize
     )
+    # main(
+    #     train_flag=False,
+    #     new_record=cur_new_record,
+    #     is_search_for_new_record=False,
+    #     user_id=3,
+    #     is_visualize=False
+    # )
 # default="../data/new_record.json"
